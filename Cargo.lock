@@ -5848,6 +5848,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "84992abeed3ae42e8401b25d266d12bcba1def0abe59d22f6b9781167545f71e"
 dependencies = [
  "aquamarine",
+ "axum",
  "bytes",
  "derive_more",
  "dptree",
@@ -5856,6 +5857,7 @@ dependencies = [
  "log",
  "mime",
  "pin-project",
+ "rand 0.8.8",
  "serde",
  "serde_json",
  "teloxide-core",
@@ -5864,6 +5866,8 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "tower",
+ "tower-http",
  "url",
 ]
 
@@ -6214,6 +6218,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
+ "tracing",
  "url",
 ]
 
@@ -6681,6 +6686,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum",
  "dotenvy",
  "figment",
  "jiff",
@@ -6690,6 +6696,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
  "warden-agent-core",
  "warden-domain",

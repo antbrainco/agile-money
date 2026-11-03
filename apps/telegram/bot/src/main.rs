@@ -4,6 +4,7 @@
 mod config;
 mod setup;
 mod telegram;
+mod webhook;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -20,7 +21,8 @@ use warden_rail_sol::SolRail;
 use warden_store::PgStore;
 
 use crate::config::Config;
-use crate::telegram::{App, TelegramApprover, TelegramNotifier};
+use crate::telegram::{App, ChatTurn, TelegramApprover, TelegramNotifier};
+use crate::webhook::Webhook;
 
 /// How often expired approvals are swept.
 const SWEEP_EVERY: Duration = Duration::from_secs(30);
@@ -31,6 +33,8 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
     let config = Config::load()?;
+    // Checked before anything connects, so a bad URL or secret fails fast.
+    let webhook = Webhook::resolve(config.telegram.webhook.as_ref())?;
 
     let store = PgStore::connect(&config.database).await?;
     if config.database.migrate_on_start {
@@ -69,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
             vec![warden_rail_sol::sol()],
             ids.clone(),
         )),
-        Arc::new(ListContacts::new(contacts)),
+        Arc::new(ListContacts::new(contacts.clone())),
         Arc::new(PaymentStatus::new(payments.clone())),
     ];
     let agent = Agent::new(
@@ -84,6 +88,7 @@ async fn main() -> anyhow::Result<()> {
     .with_briefing(setup::briefing(&config));
 
     let pause = PauseSwitch::default();
+    let turn = ChatTurn::default();
     let executor = Executor::new(
         store_arc.clone(),
         store_arc,
@@ -93,6 +98,7 @@ async fn main() -> anyhow::Result<()> {
             bot: bot.clone(),
             chat: owner,
             cluster,
+            turn: turn.clone(),
         }),
         config.executor.clone(),
     );
@@ -129,17 +135,34 @@ async fn main() -> anyhow::Result<()> {
         rail,
         pause,
         cluster,
+        contacts,
+        turn,
         history: Mutex::default(),
     });
+    if let Err(e) = bot.set_my_commands(telegram::commands()).await {
+        tracing::warn!(error = %e, "command menu not set");
+    }
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(telegram::on_message))
         .branch(Update::filter_callback_query().endpoint(telegram::on_callback));
-    Dispatcher::builder(bot, handler)
+    let mut dispatcher = Dispatcher::builder(bot.clone(), handler)
         .dependencies(dptree::deps![app])
         .enable_ctrlc_handler()
-        .build()
-        .dispatch()
-        .await;
+        .build();
+    match webhook {
+        Some(hook) => {
+            let listener = hook.serve().await?;
+            hook.register(&bot).await?;
+            tracing::info!(listen = %hook.listen, "receiving updates by webhook");
+            dispatcher
+                .dispatch_with_listener(
+                    listener,
+                    LoggingErrorHandler::with_custom_text("webhook update failed"),
+                )
+                .await;
+        }
+        None => dispatcher.dispatch().await,
+    }
 
     worker.abort();
     sweeper.abort();

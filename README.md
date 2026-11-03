@@ -67,6 +67,18 @@ Apps build one rail per Cargo feature, e.g. `cargo run -p warden-shop --no-defau
 cargo run -p warden-telegram-bot
 ```
 
+By default the bot long-polls Telegram. When `telegram.webhook.url` (or `TUNNEL_URL`) is set it
+takes updates on that public HTTPS URL instead. On every start it registers the URL and the
+`TELEGRAM_WEBHOOK_SECRET` with Telegram and checks what Telegram stored. The webhook stays set
+while the bot is down, so updates queue until it is back. Without a secret it uses a random one
+per run. Locally, a Cloudflare Tunnel forwards the URL to the bot's listener:
+
+```bash
+cloudflared tunnel --config ~/.cloudflared/tilly-dev.yml run
+```
+
+Remove the URL to go back to polling; polling mode deletes the webhook on start.
+
 The rail's live test sends 1000 lamports to its own wallet and checks that a retry doesn't pay twice:
 
 ```bash

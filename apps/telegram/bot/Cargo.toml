@@ -9,17 +9,19 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+axum.workspace = true
 async-trait.workspace = true
 dotenvy.workspace = true
 jiff.workspace = true
 secrecy.workspace = true
-uuid.workspace = true
+uuid = { workspace = true, features = ["v4"] }
 teloxide.workspace = true
 figment.workspace = true
 serde.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["net"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
+url.workspace = true
 warden-agent-core.workspace = true
 warden-domain.workspace = true
 warden-executor.workspace = true

@@ -1,5 +1,6 @@
 //! Layered config: `warden.toml`, then `WARDEN_*` env vars (`__` nests), then
-//! the conventional `DATABASE_URL` and `TELOXIDE_TOKEN`.
+//! the conventional `DATABASE_URL`, `TELOXIDE_TOKEN`, `TUNNEL_URL` and
+//! `TELEGRAM_WEBHOOK_SECRET`.
 
 use figment::Figment;
 use figment::providers::{Env, Format, Toml};
@@ -11,6 +12,8 @@ use warden_domain::{Amount, SolAddress};
 use warden_executor::ExecConfig;
 use warden_rail_sol::Cluster;
 use warden_store::DbConfig;
+
+use crate::webhook::WebhookConfig;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -42,6 +45,8 @@ pub struct TelegramConfig {
     pub token: SecretString,
     /// The only chat Tilly answers. Send /start once to learn yours.
     pub owner_chat_id: i64,
+    /// Receive updates on a public HTTPS URL instead of long polling.
+    pub webhook: Option<WebhookConfig>,
 }
 
 /// `[agent]`: the loop's step limit plus the model client's settings
@@ -138,6 +143,16 @@ impl Config {
                     .only(&["TELOXIDE_TOKEN"])
                     .map(|_| "telegram.token".into()),
             )
+            .merge(
+                Env::raw()
+                    .only(&["TUNNEL_URL"])
+                    .map(|_| "telegram.webhook.url".into()),
+            )
+            .merge(
+                Env::raw()
+                    .only(&["TELEGRAM_WEBHOOK_SECRET"])
+                    .map(|_| "telegram.webhook.secret".into()),
+            )
             .extract()?;
         Self::finish(config)
     }
@@ -224,6 +239,33 @@ mod tests {
         assert_eq!(
             llm.base_url().unwrap().as_str(),
             "https://gateway.ai.cloudflare.com/v1/acct/default/anthropic/"
+        );
+    }
+
+    #[test]
+    fn warden_toml_webhook_resolves_to_the_tunnel() {
+        #[derive(Deserialize)]
+        struct File {
+            telegram: Section,
+        }
+        #[derive(Deserialize)]
+        struct Section {
+            webhook: Option<WebhookConfig>,
+        }
+        let file: File = Figment::from(Toml::file(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../warden.toml"
+        )))
+        .extract()
+        .unwrap();
+        let hook = crate::webhook::Webhook::resolve(file.telegram.webhook.as_ref())
+            .unwrap()
+            .unwrap();
+        assert_eq!(hook.endpoint.as_str(), "https://bot.example.com/telegram");
+        assert_eq!(hook.listen.to_string(), "127.0.0.1:8443");
+        assert!(
+            hook.ephemeral_secret,
+            "the secret never comes from the file"
         );
     }
 

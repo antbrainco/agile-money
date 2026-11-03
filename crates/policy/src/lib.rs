@@ -128,19 +128,21 @@ fn check(
             deny(format!("recipient {} is not allowlisted", intent.to.label))
         }
         Rule::MaxPerTx { amount: cap } if cap.asset == amount.asset && amount.minor > cap.minor => {
-            deny(format!("{} exceeds the per-transaction cap", amount.minor))
+            deny(format!("{amount} exceeds the {cap} per-payment cap"))
         }
         Rule::MaxPerWindow { amount: cap, .. } if cap.asset == amount.asset => {
             match window_total(spend, amount) {
                 Ok(total) if total.minor <= cap.minor => Decision::Allow,
-                Ok(_) => deny("window cap reached, counting reserved spend"),
+                Ok(_) => deny(format!(
+                    "{amount} would pass the {cap} limit for the window, counting payments already sent or pending"
+                )),
                 Err(_) => deny("spend snapshot does not match the intent's asset"),
             }
         }
         Rule::ApprovalAbove { amount: threshold }
             if threshold.asset == amount.asset && amount.minor > threshold.minor =>
         {
-            require(format!("{} is above the approval threshold", amount.minor))
+            require(format!("{amount} is above the {threshold} approval threshold"))
         }
         Rule::QuietHours { from, to, tz } => quiet_hours(now, *from, *to, tz),
         _ => Decision::Allow,

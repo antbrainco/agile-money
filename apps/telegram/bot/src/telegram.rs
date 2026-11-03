@@ -5,12 +5,12 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use teloxide::prelude::*;
-use teloxide::types::{ChatAction, InlineKeyboardButton, InlineKeyboardMarkup, MessageId};
+use teloxide::types::{BotCommand, ChatAction, InlineKeyboardButton, InlineKeyboardMarkup, MessageId};
 use warden_agent_core::{Agent, Message as Turn, RunObserver};
 use warden_domain::ports::ReadModel;
-use warden_domain::{Approval, ApprovalId, Intent, Proposed, RailRef, Untrusted, UserId};
+use warden_domain::{Approval, ApprovalId, Intent, Proposed, RailRef, Recipient, Untrusted, UserId};
 use warden_executor::{Notice, Notifier, PauseSwitch};
-use warden_policy::{Approver, Payments, Resolution};
+use warden_policy::{Approver, Payments, ProposeOutcome, Resolution};
 use warden_rail_sol::{Cluster, SolRail};
 use warden_store::PgStore;
 
@@ -30,8 +30,15 @@ pub struct App {
     pub rail: Arc<SolRail>,
     pub pause: PauseSwitch,
     pub cluster: Cluster,
+    pub contacts: Vec<Recipient>,
+    pub turn: ChatTurn,
     pub history: Mutex<Vec<Turn>>,
 }
+
+/// Held while the agent answers the owner. Payment notices wait for it, so a
+/// confirmation never lands above the reply that announced the payment.
+#[derive(Debug, Clone, Default)]
+pub struct ChatTurn(Arc<tokio::sync::Mutex<()>>);
 
 impl std::fmt::Debug for App {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -83,6 +90,7 @@ pub struct TelegramNotifier {
     pub bot: Bot,
     pub chat: ChatId,
     pub cluster: Cluster,
+    pub turn: ChatTurn,
 }
 
 impl TelegramNotifier {
@@ -120,17 +128,56 @@ impl Notifier for TelegramNotifier {
                 summary, reason, ..
             } => format!("Payment of {summary} hit a problem ({reason}). Retrying shortly."),
         };
-        if let Err(e) = self.bot.send_message(self.chat, text).await {
-            tracing::warn!(error = %e, "notice not delivered");
-        }
+        // Sent from a task so the executor doesn't wait out the agent's turn.
+        let (bot, chat, turn) = (self.bot.clone(), self.chat, self.turn.clone());
+        tokio::spawn(async move {
+            let _turn = turn.0.lock().await;
+            if let Err(e) = bot.send_message(chat, text).await {
+                tracing::warn!(error = %e, "notice not delivered");
+            }
+        });
     }
 }
 
 const HELP: &str = "Hi, I'm Tilly. Tell me who to pay and how much, e.g. \"pay Acme 0.1 SOL for the logo\".\n\n\
 Payments above your approval threshold wait for your tap. Commands:\n\
+/contacts - who I can pay\n\
 /balance - wallet address and balance\n\
 /pause - stop all payments\n\
-/resume - allow payments again";
+/resume - allow payments again\n\
+/help - this message";
+
+/// The menu Telegram shows next to the message box. Mirrors `HELP`.
+pub fn commands() -> Vec<BotCommand> {
+    vec![
+        BotCommand::new("contacts", "Who I can pay"),
+        BotCommand::new("balance", "Wallet address and balance"),
+        BotCommand::new("pause", "Stop all payments"),
+        BotCommand::new("resume", "Allow payments again"),
+        BotCommand::new("help", "What I can do"),
+    ]
+}
+
+/// `/contacts@AgileMoneyBot extra` -> `/contacts`; anything else unchanged.
+fn command(text: &str) -> &str {
+    let text = text.trim();
+    if !text.starts_with('/') {
+        return text;
+    }
+    let word = text.split_whitespace().next().unwrap_or(text);
+    word.split_once('@').map_or(word, |(cmd, _)| cmd)
+}
+
+fn contact_list(contacts: &[Recipient]) -> String {
+    if contacts.is_empty() {
+        return "No saved contacts yet. Add them under [[contacts]] in warden.toml.".to_owned();
+    }
+    let lines: Vec<String> = contacts
+        .iter()
+        .map(|c| format!("{}\n{}", c.label, c.address))
+        .collect();
+    format!("I can pay these contacts:\n\n{}", lines.join("\n\n"))
+}
 
 pub async fn on_message(bot: Bot, msg: Message, app: Arc<App>) -> ResponseResult<()> {
     if msg.chat.id != app.owner {
@@ -150,8 +197,9 @@ pub async fn on_message(bot: Bot, msg: Message, app: Arc<App>) -> ResponseResult
     let Some(text) = msg.text() else {
         return Ok(());
     };
-    let reply = match text.trim() {
+    let reply = match command(text) {
         "/start" | "/help" => HELP.to_owned(),
+        "/contacts" => contact_list(&app.contacts),
         "/balance" => match app.rail.balance().await {
             Ok(lamports) => format!(
                 "Wallet {}\nBalance: {} SOL{}",
@@ -174,6 +222,8 @@ pub async fn on_message(bot: Bot, msg: Message, app: Arc<App>) -> ResponseResult
             "Resumed.".to_owned()
         }
         _ => {
+            // Until the reply is final; payment notices queue behind it.
+            let _turn = app.turn.0.lock().await;
             let _ = bot.send_chat_action(app.owner, ChatAction::Typing).await;
             let history = app
                 .history
@@ -187,8 +237,17 @@ pub async fn on_message(bot: Bot, msg: Message, app: Arc<App>) -> ResponseResult
                 .await
             {
                 Ok(report) => {
-                    remember(&app, text, &report.text);
-                    report.text
+                    remember(&app, text, &report.text, &report.proposals);
+                    // From the pause switch, not the model: it can't see it.
+                    let queued = report
+                        .proposals
+                        .iter()
+                        .any(|p| matches!(p, ProposeOutcome::Queued { .. }));
+                    if queued && app.pause.is_paused() {
+                        format!("{}\n\n{PAUSED_NOTE}", report.text)
+                    } else {
+                        report.text
+                    }
                 }
                 Err(e) => {
                     tracing::error!(error = %e, "agent run failed");
@@ -284,13 +343,38 @@ impl RunObserver for LiveReply {
     }
 }
 
-fn remember(app: &App, user: &str, assistant: &str) {
+const PAUSED_NOTE: &str = "Payments are paused, so this waits until you send /resume.";
+
+/// History keeps only text, so each reply carries what its turn really did.
+/// Without it the model sees "pay Bob" answered with "on its way" and can
+/// repeat the answer for a new request without calling propose_payment.
+fn record(proposals: &[ProposeOutcome]) -> String {
+    if proposals.is_empty() {
+        return "[record: no payment was proposed in this turn]".to_owned();
+    }
+    let statuses: Vec<&str> = proposals
+        .iter()
+        .map(|p| match p {
+            ProposeOutcome::Queued { .. } => "allowed",
+            ProposeOutcome::AwaitingApproval { .. } => "awaiting_approval",
+            ProposeOutcome::Denied { .. } => "denied",
+            ProposeOutcome::Duplicate { .. } => "duplicate",
+        })
+        .collect();
+    format!(
+        "[record: propose_payment called {} time(s) in this turn: {}]",
+        statuses.len(),
+        statuses.join(", ")
+    )
+}
+
+fn remember(app: &App, user: &str, assistant: &str, proposals: &[ProposeOutcome]) {
     let mut history = app.history.lock().unwrap_or_else(|e| e.into_inner());
     history.push(Turn::User {
         text: Untrusted::new(user.to_owned()),
     });
     history.push(Turn::Assistant {
-        text: assistant.to_owned(),
+        text: format!("{assistant}\n\n{}", record(proposals)),
     });
     let excess = history.len().saturating_sub(HISTORY);
     history.drain(..excess);
@@ -339,5 +423,44 @@ async fn resolve(app: &App, data: &str) -> Result<String, String> {
         }
         Err(warden_policy::Error::NotAwaiting(_)) => Err("Already answered.".into()),
         Err(e) => Err(format!("Couldn't do that: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn commands_drop_the_bot_name_and_arguments() {
+        assert_eq!(command("/contacts"), "/contacts");
+        assert_eq!(command(" /contacts@AgileMoneyBot "), "/contacts");
+        assert_eq!(command("/balance now"), "/balance");
+        assert_eq!(command("pay Bob 0.01 SOL"), "pay Bob 0.01 SOL");
+    }
+
+    #[test]
+    fn record_says_what_the_turn_did() {
+        assert_eq!(
+            record(&[]),
+            "[record: no payment was proposed in this turn]"
+        );
+        let intent = warden_domain::IntentId::new(uuid::Uuid::nil());
+        assert_eq!(
+            record(&[
+                ProposeOutcome::Queued { intent },
+                ProposeOutcome::Denied {
+                    intent,
+                    reasons: vec![]
+                }
+            ]),
+            "[record: propose_payment called 2 time(s) in this turn: allowed, denied]"
+        );
+    }
+
+    #[test]
+    fn help_lists_every_menu_command() {
+        for c in commands() {
+            assert!(HELP.contains(&format!("/{}", c.command)), "{}", c.command);
+        }
     }
 }
