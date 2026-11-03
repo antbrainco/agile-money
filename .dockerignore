@@ -1,0 +1,9 @@
+target
+.env
+.env.*
+!.env.example
+.git
+*.pem
+**/node_modules
+**/.next
+deploy/*.json

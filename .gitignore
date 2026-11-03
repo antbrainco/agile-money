@@ -3,3 +3,5 @@
 *.pem
 node_modules/
 .next/
+deploy/bot.env
+deploy/tunnel.json

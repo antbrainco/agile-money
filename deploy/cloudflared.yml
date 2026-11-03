@@ -1,0 +1,10 @@
+# The same tunnel as ~/.cloudflared/tilly-dev.yml, pointed at the bot container.
+# tunnel.json is that tunnel's credentials file, copied to the server.
+tunnel: <tunnel-id>
+credentials-file: /etc/cloudflared/tunnel.json
+
+ingress:
+  - hostname: bot.example.com
+    path: ^/telegram$
+    service: http://bot:8443
+  - service: http_status:404

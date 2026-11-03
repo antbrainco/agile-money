@@ -49,7 +49,9 @@ Apps build one rail per Cargo feature, e.g. `cargo run -p warden-shop --no-defau
 ## Run the Telegram demo (Solana devnet)
 
 1. Create a bot with @BotFather and put its token in `.env` as `TELOXIDE_TOKEN`.
-2. Put your DeepSeek key in `.env` as `DEEPSEEK_API_KEY`.
+2. `warden.toml` uses DeepSeek V4 Flash on Cloudflare Workers AI. Put a Cloudflare API token
+   with Workers AI permission in `.env` as `WARDEN_AGENT__API_KEY`. For other providers, see
+   [Model providers](#model-providers).
 3. Make a devnet wallet and paste the printed line into `.env`. Then fund the address at
    https://faucet.solana.com:
 
@@ -93,6 +95,29 @@ The rail's live test sends 1000 lamports to its own wallet and checks that a ret
 ```bash
 cargo test -p warden-rail-sol --features live --test live -- --nocapture
 ```
+
+## Deploy to a server
+
+The bot runs as one container next to a Cloudflare Tunnel container, which carries
+Telegram's webhook in, so the server needs no open ports. Postgres is external, e.g. Neon's
+free tier. Use Neon's direct endpoint, not the `-pooler` one: the bot sets
+`statement_timeout` as a startup option, and migrations take an advisory lock, and PgBouncer
+supports neither.
+
+1. Create a Neon project and copy its direct connection string.
+2. On the server, clone the repo and go to `deploy/`. Copy `bot.env.example` to `bot.env`,
+   fill it in, then run `chmod 600 bot.env`.
+3. Copy the tunnel's credentials file, `~/.cloudflared/<tunnel-id>.json`, to `deploy/tunnel.json`.
+4. Stop the laptop's tunnel and bot, then start the server's:
+
+   ```bash
+   docker compose up -d --build
+   docker compose logs -f bot
+   ```
+
+Migrations run on start. The image bakes in `warden.toml` and nothing secret; `WARDEN_*`
+variables in `bot.env` override it. The wallet key comes from env, which is fine for devnet;
+with real funds, keep keys in a KMS or HSM.
 
 ## Model providers
 
