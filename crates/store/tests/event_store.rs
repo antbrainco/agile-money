@@ -292,3 +292,75 @@ async fn approval_maps_back_to_its_intent(pool: PgPool) {
     );
     assert_eq!(store.awaiting_approval().await.unwrap(), [intent()]);
 }
+
+fn invoice(n: u128) -> (warden_domain::Invoice, warden_domain::PaymentRequest) {
+    let total = Amount::new(5_000_000_000, sol());
+    let invoice = warden_domain::Invoice {
+        id: warden_domain::InvoiceId::new(Uuid::from_u128(n)),
+        to: warden_domain::Client {
+            name: "Acme".into(),
+            email: None,
+        },
+        lines: vec![warden_domain::LineItem {
+            description: "logo".into(),
+            quantity: 1,
+            unit_price: total.clone(),
+        }],
+        total,
+        rail: RailId::Sol,
+        state: warden_domain::InvoiceState::Sent,
+        due: None,
+    };
+    let request = warden_domain::PaymentRequest {
+        url: "solana:x".into(),
+        qr_png: None,
+        rail_ref: RailRef::Sol {
+            reference: SolAddress::from_bytes([u8::try_from(n).unwrap(); 32]),
+            signature: None,
+        },
+    };
+    (invoice, request)
+}
+
+#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+async fn paid_invoices_leave_the_open_list(pool: PgPool) {
+    let store = PgStore::from_pool(pool);
+    let since = Timestamp::now() - SignedDuration::from_hours(1);
+    for n in [10, 11] {
+        let (details, request) = invoice(n);
+        store
+            .append(
+                &StreamId::Invoice(details.id),
+                0,
+                vec![Event::InvoiceIssued {
+                    invoice: details.id,
+                    details,
+                    request,
+                }],
+                vec![],
+            )
+            .await
+            .unwrap();
+    }
+    let open = store.open_invoices(since).await.unwrap();
+    assert_eq!(open, [invoice(10), invoice(11)]);
+
+    let (paid, request) = invoice(10);
+    store
+        .append(
+            &StreamId::Invoice(paid.id),
+            1,
+            vec![Event::InvoicePaid {
+                invoice: paid.id,
+                received: paid.total.clone(),
+                rail_ref: request.rail_ref,
+            }],
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(store.open_invoices(since).await.unwrap(), [invoice(11)]);
+    // Older than the window: no longer watched.
+    let later = Timestamp::now() + SignedDuration::from_hours(1);
+    assert!(store.open_invoices(later).await.unwrap().is_empty());
+}

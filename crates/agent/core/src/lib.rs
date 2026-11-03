@@ -40,6 +40,8 @@ pub enum Error {
     Domain(#[from] warden_domain::Error),
     #[error(transparent)]
     Policy(#[from] warden_policy::Error),
+    #[error("could not issue the request: {0}")]
+    Billing(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

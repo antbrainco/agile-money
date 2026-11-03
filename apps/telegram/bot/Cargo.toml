@@ -13,6 +13,8 @@ axum.workspace = true
 async-trait.workspace = true
 dotenvy.workspace = true
 jiff.workspace = true
+png.workspace = true
+qrcode.workspace = true
 secrecy.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 teloxide.workspace = true

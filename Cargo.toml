@@ -83,7 +83,11 @@ solana-system-interface = "3.3.0"
 spl-memo-interface = "2.1.0"
 spl-associated-token-account-interface = "2.0.0"
 spl-token-interface = "3.0.0"
+solana-transaction-status-client-types = "4.4.0"
 teloxide = { version = "0.17.0", features = ["macros", "webhooks-axum"] }
+# Payment request QR codes, drawn by hand and written as PNG.
+png = "0.18.1"
+qrcode = { version = "0.14.1", default-features = false }
 tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "time", "sync", "signal"] }
 tower = { version = "0.5.3", features = ["timeout", "retry", "util"] }
 tracing = "0.1.44"

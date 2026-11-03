@@ -4,7 +4,8 @@ use async_trait::async_trait;
 use jiff::Timestamp;
 use warden_domain::ports::{ReadModel, StoreError};
 use warden_domain::{
-    AgentId, Amount, ApprovalId, Asset, IdempotencyKey, IntentId, Policy, SpendSnapshot, StreamId,
+    AgentId, Amount, ApprovalId, Asset, Event, IdempotencyKey, IntentId, Invoice, PaymentRequest,
+    Policy, SpendSnapshot, StreamId,
 };
 
 use crate::PgStore;
@@ -92,6 +93,36 @@ impl ReadModel for PgStore {
 }
 
 impl PgStore {
+    /// Invoices issued at or after `since` with no payment recorded yet, oldest
+    /// first, for the payment watcher.
+    pub async fn open_invoices(
+        &self,
+        since: Timestamp,
+    ) -> Result<Vec<(Invoice, PaymentRequest)>, StoreError> {
+        let bodies = sqlx::query_scalar!(
+            r#"SELECT body FROM events e
+               WHERE e.type = 'invoice_issued' AND e.at >= $1
+                 AND NOT EXISTS (
+                   SELECT 1 FROM events p WHERE p.stream = e.stream AND p.type = 'invoice_paid'
+                 )
+               ORDER BY e.seq"#,
+            jiff_sqlx::Timestamp::from(since) as _,
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(backend)?;
+        bodies
+            .into_iter()
+            .filter_map(|body| match serde_json::from_value(body) {
+                Ok(Event::InvoiceIssued {
+                    details, request, ..
+                }) => Some(Ok((details, request))),
+                Ok(_) => None,
+                Err(e) => Some(Err(backend(e))),
+            })
+            .collect()
+    }
+
     /// Stores a new policy version. Policies are human-edited (rule 9); the bot
     /// seeds one from config at startup.
     pub async fn save_policy(

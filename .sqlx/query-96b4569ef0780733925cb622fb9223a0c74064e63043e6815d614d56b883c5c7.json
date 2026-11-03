@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT body FROM events e\n               WHERE e.type = 'invoice_issued' AND e.at >= $1\n                 AND NOT EXISTS (\n                   SELECT 1 FROM events p WHERE p.stream = e.stream AND p.type = 'invoice_paid'\n                 )\n               ORDER BY e.seq",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "body",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "events",
+            "name": "body"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "96b4569ef0780733925cb622fb9223a0c74064e63043e6815d614d56b883c5c7"
+}

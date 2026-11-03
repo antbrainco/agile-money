@@ -66,6 +66,11 @@ Apps build one rail per Cargo feature, e.g. `cargo run -p warden-shop --no-defau
    (Solana Devnet). Drop `[policy.usdc]` to turn USDC off; an asset without limits can't be paid.
    The first USDC payment to a contact also creates their token account, about 0.002 SOL of rent
    paid by the wallet.
+6. To get paid, ask: "request 5 USDC from Dana for the website". Tilly records an invoice and
+   sends you a Solana Pay QR code and link to forward. Any Solana Pay wallet (Phantom, Solflare)
+   can pay it. A watcher checks open requests every 10 seconds for a week, using the request's
+   `reference`. When the total arrives it records `invoice_paid` and tells you, with an
+   explorer link. No spending policy applies to money coming in.
 
 ```bash
 cargo run -p warden-telegram-bot

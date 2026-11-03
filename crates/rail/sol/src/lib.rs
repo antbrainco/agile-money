@@ -15,11 +15,16 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::api::client_error::Error as ClientError;
+use solana_rpc_client::api::config::RpcTransactionConfig;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signature, Signer};
-use solana_sdk::transaction::Transaction;
+use solana_sdk::transaction::{Transaction, VersionedTransaction};
+use solana_transaction_status_client_types::option_serializer::OptionSerializer;
+use solana_transaction_status_client_types::{
+    UiLoadedAddresses, UiTransactionEncoding, UiTransactionStatusMeta, UiTransactionTokenBalance,
+};
 use url::Url;
 use warden_domain::ports::{Rail, RailError};
 use warden_domain::{
@@ -234,6 +239,67 @@ impl SolRail {
             .map_err(classify)
     }
 
+    /// Successful transactions carrying `reference` that paid this wallet `asset`,
+    /// oldest first. Solana Pay wallets attach the request's reference to the
+    /// transfer, so this is how an invoice payment is found.
+    pub async fn received(
+        &self,
+        reference: &SolAddress,
+        asset: &Asset,
+    ) -> Result<Vec<Received>, RailError> {
+        let reference = Pubkey::new_from_array(reference.to_bytes());
+        let found = self
+            .rpc
+            .get_signatures_for_address(&reference)
+            .await
+            .map_err(classify)?;
+        let wallet = self.payer.pubkey();
+        let mint = mint_of(asset);
+        let mut received = Vec::new();
+        for status in found.into_iter().rev().filter(|s| s.err.is_none()) {
+            let signature =
+                Signature::from_str(&status.signature).map_err(|e| transport(e.to_string()))?;
+            let tx = self
+                .rpc
+                .get_transaction_with_config(
+                    &signature,
+                    RpcTransactionConfig {
+                        encoding: Some(UiTransactionEncoding::Base64),
+                        commitment: Some(CommitmentConfig::confirmed()),
+                        max_supported_transaction_version: Some(0),
+                        min_context_slot: None,
+                    },
+                )
+                .await
+                .map_err(classify)?;
+            let (Some(meta), Some(decoded)) =
+                (tx.transaction.meta, tx.transaction.transaction.decode())
+            else {
+                continue;
+            };
+            if meta.err.is_some() {
+                continue;
+            }
+            let minor = credited(
+                &account_keys(&decoded, &meta),
+                (&meta.pre_balances, &meta.post_balances),
+                (
+                    &token_balances(&meta.pre_token_balances),
+                    &token_balances(&meta.post_token_balances),
+                ),
+                &wallet,
+                mint.as_ref(),
+            );
+            if minor > 0 {
+                received.push(Received {
+                    signature: sol_signature(&signature),
+                    minor,
+                });
+            }
+        }
+        Ok(received)
+    }
+
     /// The first signature on `reference` that did not fail, if any.
     async fn landed(&self, reference: &Pubkey) -> Result<Option<Signature>, RailError> {
         let found = self
@@ -247,6 +313,82 @@ impl SolRail {
             .find(|s| s.err.is_none())
             .map(|s| Signature::from_str(&s.signature).map_err(|e| transport(e.to_string())))
             .transpose()
+    }
+}
+
+/// One transaction that paid into this wallet under a Solana Pay reference.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Received {
+    pub signature: SolSignature,
+    /// What it added to the wallet, in the asset's minor units.
+    pub minor: u128,
+}
+
+/// A token balance line from a transaction's metadata, cut down to what crediting needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TokenBalance {
+    mint: Pubkey,
+    owner: Option<Pubkey>,
+    amount: u128,
+}
+
+impl TokenBalance {
+    fn from_ui(ui: &UiTransactionTokenBalance) -> Option<Self> {
+        let owner: Option<&String> = ui.owner.as_ref().into();
+        Some(Self {
+            mint: Pubkey::from_str(&ui.mint).ok()?,
+            owner: owner.and_then(|o| Pubkey::from_str(o).ok()),
+            amount: ui.ui_token_amount.amount.parse().ok()?,
+        })
+    }
+}
+
+fn token_balances(list: &OptionSerializer<Vec<UiTransactionTokenBalance>>) -> Vec<TokenBalance> {
+    let list: Option<&Vec<_>> = list.as_ref().into();
+    list.map(|l| l.iter().filter_map(TokenBalance::from_ui).collect())
+        .unwrap_or_default()
+}
+
+/// Static keys, then any loaded from lookup tables, in the order balances index them.
+fn account_keys(tx: &VersionedTransaction, meta: &UiTransactionStatusMeta) -> Vec<Pubkey> {
+    let mut keys = tx.message.static_account_keys().to_vec();
+    let loaded: Option<&UiLoadedAddresses> = meta.loaded_addresses.as_ref().into();
+    if let Some(loaded) = loaded {
+        keys.extend(
+            loaded
+                .writable
+                .iter()
+                .chain(&loaded.readonly)
+                .filter_map(|k| Pubkey::from_str(k).ok()),
+        );
+    }
+    keys
+}
+
+/// How much one transaction added to `wallet`: lamports when `mint` is `None`,
+/// else that mint's tokens across the wallet's token accounts. A net outflow is 0.
+fn credited(
+    keys: &[Pubkey],
+    (pre, post): (&[u64], &[u64]),
+    (pre_tokens, post_tokens): (&[TokenBalance], &[TokenBalance]),
+    wallet: &Pubkey,
+    mint: Option<&Pubkey>,
+) -> u128 {
+    match mint {
+        None => keys
+            .iter()
+            .position(|k| k == wallet)
+            .and_then(|i| Some(post.get(i)?.saturating_sub(*pre.get(i)?)))
+            .map_or(0, u128::from),
+        Some(mint) => {
+            let held = |list: &[TokenBalance]| -> u128 {
+                list.iter()
+                    .filter(|b| &b.mint == mint && b.owner.as_ref() == Some(wallet))
+                    .map(|b| b.amount)
+                    .sum()
+            };
+            held(post_tokens).saturating_sub(held(pre_tokens))
+        }
     }
 }
 
@@ -375,7 +517,7 @@ impl Rail for SolRail {
             self.payer.pubkey(),
             inv.total.major(),
             encode("Tilly"),
-            encode(&format!("Invoice for {}", inv.to.name)),
+            encode(&message(inv)),
         );
         Ok(PaymentRequest {
             url,
@@ -478,6 +620,17 @@ impl Rail for SolRail {
             }
             _ => Settlement::Pending,
         })
+    }
+}
+
+/// The Solana Pay `message` the payer's wallet shows: what the invoice is for.
+/// It is public, readable on chain by anyone who looks up the transaction.
+fn message(inv: &Invoice) -> String {
+    match inv.lines.first() {
+        Some(line) if !line.description.trim().is_empty() => {
+            format!("{} - {}", inv.to.name, line.description.trim())
+        }
+        _ => format!("Invoice for {}", inv.to.name),
     }
 }
 
@@ -601,6 +754,52 @@ mod tests {
         assert!(rail.supports(&devnet_usdc()));
         assert!(rail.supports(&sol()));
         assert_eq!(rail.assets().len(), 2);
+    }
+
+    fn balance(mint: Pubkey, owner: Pubkey, amount: u128) -> TokenBalance {
+        TokenBalance {
+            mint,
+            owner: Some(owner),
+            amount,
+        }
+    }
+
+    #[test]
+    fn lamports_credited_to_the_wallet() {
+        let (payer, wallet, reference) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let keys = [payer, wallet, reference];
+        let pre = [5_000_000, 1_000, 0];
+        let post = [3_995_000, 1_001_000, 0];
+        let credit = |who| credited(&keys, (&pre, &post), (&[], &[]), who, None);
+        assert_eq!(credit(&wallet), 1_000_000);
+        // The payer's own balance went down, which is not a credit.
+        assert_eq!(credit(&payer), 0);
+        assert_eq!(credit(&Pubkey::new_unique()), 0);
+    }
+
+    #[test]
+    fn tokens_credited_only_for_the_wallet_and_mint() {
+        let (payer, wallet, mint, other_mint) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        // The wallet's token account did not exist before, so it has no pre line.
+        let pre = [balance(mint, payer, 9_000_000)];
+        let post = [
+            balance(mint, payer, 4_000_000),
+            balance(mint, wallet, 5_000_000),
+            balance(other_mint, wallet, 7),
+        ];
+        let credit = |who, m| credited(&[], (&[], &[]), (&pre, &post), who, Some(m));
+        assert_eq!(credit(&wallet, &mint), 5_000_000);
+        assert_eq!(credit(&wallet, &other_mint), 7);
+        assert_eq!(credit(&payer, &mint), 0);
     }
 
     #[test]

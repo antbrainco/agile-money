@@ -2,6 +2,7 @@
 //! executor and the approval sweeper run in the same process.
 
 mod config;
+mod invoices;
 mod setup;
 mod telegram;
 mod webhook;
@@ -12,7 +13,7 @@ use std::time::Duration;
 use secrecy::ExposeSecret;
 use teloxide::prelude::*;
 use tracing_subscriber::EnvFilter;
-use warden_agent_core::tools::{ListContacts, PaymentStatus, ProposePayment};
+use warden_agent_core::tools::{ListContacts, PaymentStatus, ProposePayment, RequestPayment};
 use warden_agent_core::{Agent, DynTool};
 use warden_domain::ports::{IdGen, Rail, SystemClock, UuidV7};
 use warden_executor::{Executor, PauseSwitch};
@@ -21,6 +22,7 @@ use warden_rail_sol::SolRail;
 use warden_store::PgStore;
 
 use crate::config::Config;
+use crate::invoices::{TelegramBiller, Watcher};
 use crate::telegram::{App, ChatTurn, TelegramApprover, TelegramNotifier};
 use crate::webhook::Webhook;
 
@@ -80,6 +82,16 @@ async fn main() -> anyhow::Result<()> {
             rail.assets(),
             ids.clone(),
         )),
+        Arc::new(RequestPayment::new(
+            rail.assets(),
+            Arc::new(TelegramBiller {
+                rail: rail.clone(),
+                store: store.clone(),
+                bot: bot.clone(),
+                chat: owner,
+            }),
+            ids.clone(),
+        )),
         Arc::new(ListContacts::new(contacts.clone())),
         Arc::new(PaymentStatus::new(payments.clone())),
     ];
@@ -123,6 +135,18 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     });
+
+    let watcher = tokio::spawn(
+        Watcher {
+            rail: rail.clone(),
+            store: store.clone(),
+            bot: bot.clone(),
+            chat: owner,
+            cluster,
+            turn: turn.clone(),
+        }
+        .run(),
+    );
 
     tracing::info!(
         %model,
@@ -173,6 +197,7 @@ async fn main() -> anyhow::Result<()> {
 
     worker.abort();
     sweeper.abort();
+    watcher.abort();
     store.close().await;
     Ok(())
 }

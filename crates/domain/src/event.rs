@@ -4,8 +4,8 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ApprovalId, Decision, IntentHash, IntentId, InvalidValue, InvoiceId, PaymentRequest, PolicyId,
-    Proposal, RailRef, UserId,
+    Amount, ApprovalId, Decision, IntentHash, IntentId, InvalidValue, Invoice, InvoiceId,
+    PaymentRequest, PolicyId, Proposal, RailRef, UserId,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,12 +55,17 @@ pub enum Event {
         intent: IntentId,
         attempts: u8,
     },
+    /// Carries the whole invoice so the payment watcher works from the log alone.
     InvoiceIssued {
         invoice: InvoiceId,
+        details: Invoice,
         request: PaymentRequest,
     },
+    /// The rail saw at least the invoice total arrive; `rail_ref` is the payment
+    /// that reached it.
     InvoicePaid {
         invoice: InvoiceId,
+        received: Amount,
         rail_ref: RailRef,
     },
     PolicyChanged {
