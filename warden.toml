@@ -7,21 +7,36 @@ acquire_timeout_ms = 5000
 statement_timeout_ms = 10000
 migrate_on_start = true
 
+[telegram] # token comes from TELOXIDE_TOKEN
+# Your chat id; message the bot /start to learn it. Or set WARDEN_TELEGRAM__OWNER_CHAT_ID.
+owner_chat_id = 0
+
 [executor]
 poll_interval_ms = 500
-max_attempts = 5
+lease_ms = 180000
+retry_delay_ms = 90000 # longer than a blockhash lives
+watch_delay_ms = 2000
 
-[approvals]
-expiry_minutes = 15
-
-[agent]
-provider = "claude" # claude | openai | deepseek
+[agent] # key comes from the provider's own variable, e.g. DEEPSEEK_API_KEY
+provider = "deepseek" # claude | openai | deepseek
 step_limit = 12
 
-[rail.sol]
-enabled = true
+[rail.sol] # keypair comes from WARDEN_RAIL__SOL__KEYPAIR
+rpc_url = "https://api.devnet.solana.com"
 mainnet = false
 
-[rail.paypal]
-enabled = false
-mainnet = false
+# The owner's limits, in SOL. Only a human edits these (rule 9); a change is
+# stored as a new policy version on the next start.
+[policy]
+max_per_tx = "1"
+approval_above = "0.05"
+max_per_day = "2"
+
+# Who the agent may pay. Anything else is denied by policy.
+[[contacts]]
+label = "Acme Design"
+address = "7Np41oeYqPefeNQEHSv1UDhYrehxin3NStELsSKCT4K2"
+
+[[contacts]]
+label = "Bob"
+address = "11111111111111111111111111111111"

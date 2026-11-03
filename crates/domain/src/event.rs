@@ -4,19 +4,18 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Amount, ApprovalId, Decision, IntentHash, IntentId, InvoiceId, PaymentRequest, PolicyId,
-    RailRef, Recipient, RunId, UserId,
+    ApprovalId, Decision, IntentHash, IntentId, InvalidValue, InvoiceId, PaymentRequest, PolicyId,
+    Proposal, RailRef, UserId,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
+    /// Carries the whole intent so the executor can rebuild it from the log alone.
     IntentProposed {
         intent: IntentId,
         hash: IntentHash,
-        amount: Amount,
-        to: Recipient,
-        run: RunId,
+        proposal: Proposal,
     },
     IntentDecided {
         intent: IntentId,
@@ -91,26 +90,63 @@ impl Event {
     }
 }
 
-/// An aggregate's stream name, e.g. `intent:<uuid>`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct StreamId(String);
+/// An aggregate's stream, stored as `intent:<uuid>` and so on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub enum StreamId {
+    Intent(IntentId),
+    Invoice(InvoiceId),
+    Policy(PolicyId),
+}
 
 impl StreamId {
-    pub fn intent(id: IntentId) -> Self {
-        Self(format!("intent:{id}"))
+    /// The intent id, if this is an intent stream.
+    pub fn as_intent(&self) -> Option<IntentId> {
+        match self {
+            Self::Intent(id) => Some(*id),
+            _ => None,
+        }
     }
+}
 
-    pub fn invoice(id: InvoiceId) -> Self {
-        Self(format!("invoice:{id}"))
+impl std::fmt::Display for StreamId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Intent(id) => write!(f, "intent:{id}"),
+            Self::Invoice(id) => write!(f, "invoice:{id}"),
+            Self::Policy(id) => write!(f, "policy:{id}"),
+        }
     }
+}
 
-    pub fn policy(id: PolicyId) -> Self {
-        Self(format!("policy:{id}"))
+impl std::str::FromStr for StreamId {
+    type Err = InvalidValue;
+    fn from_str(name: &str) -> Result<Self, InvalidValue> {
+        let bad = |reason| InvalidValue {
+            kind: "StreamId",
+            reason,
+        };
+        let (kind, id) = name.split_once(':').ok_or(bad("missing kind"))?;
+        let id = uuid::Uuid::parse_str(id).map_err(|_| bad("not a uuid"))?;
+        match kind {
+            "intent" => Ok(Self::Intent(IntentId::new(id))),
+            "invoice" => Ok(Self::Invoice(InvoiceId::new(id))),
+            "policy" => Ok(Self::Policy(PolicyId::new(id))),
+            _ => Err(bad("unknown kind")),
+        }
     }
+}
 
-    pub fn as_str(&self) -> &str {
-        &self.0
+impl TryFrom<String> for StreamId {
+    type Error = InvalidValue;
+    fn try_from(name: String) -> Result<Self, InvalidValue> {
+        name.parse()
+    }
+}
+
+impl From<StreamId> for String {
+    fn from(stream: StreamId) -> String {
+        stream.to_string()
     }
 }
 

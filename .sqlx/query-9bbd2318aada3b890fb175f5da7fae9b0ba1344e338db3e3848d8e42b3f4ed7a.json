@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO intents_view\n               (intent_id, agent_id, state, amount_minor, asset, rail, updated_at, created_at, idempotency_key)\n           VALUES ($1, $2, $3, $4::text::numeric, $5, $6, now(), $7, $8)\n           ON CONFLICT (intent_id) DO UPDATE SET state = EXCLUDED.state, updated_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9bbd2318aada3b890fb175f5da7fae9b0ba1344e338db3e3848d8e42b3f4ed7a"
+}

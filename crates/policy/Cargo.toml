@@ -11,6 +11,8 @@ publish.workspace = true
 async-trait.workspace = true
 jiff.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
 warden-domain.workspace = true
 
 [lints]
@@ -18,4 +20,5 @@ workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
-uuid.workspace = true
+tokio.workspace = true
+warden-domain = { workspace = true, features = ["mock"] }

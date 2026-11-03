@@ -20,8 +20,7 @@ async fn creates_all_tables(pool: PgPool) {
             "idempotency",
             "intents_view",
             "outbox",
-            "policies",
-            "spend_view"
+            "policies"
         ]
     );
 }

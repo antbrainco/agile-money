@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT intent_id FROM idempotency WHERE key = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "intent_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "idempotency",
+            "name": "intent_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "04847c72b7c98a6fc31e7e07f9f7fb39336bd3ebce901638c96e6a8da1213d19"
+}

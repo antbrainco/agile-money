@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used)] // helpers outside #[test] fns, which clippy.toml does not cover
 use jiff::{SignedDuration, Timestamp};
 use proptest::prelude::*;
 use uuid::Uuid;
@@ -7,14 +8,14 @@ use warden_policy::{Outcome, PolicyEngine};
 fn usdc() -> Asset {
     Asset {
         rail: RailId::Sol,
-        code: "USDC".into(),
+        code: "USDC".parse().unwrap(),
         decimals: 6,
         contract: None,
     }
 }
 
 fn acme() -> Address {
-    Address::SolPubkey("Acme111".into())
+    Address::SolPubkey(SolAddress::from_bytes([1; 32]))
 }
 
 fn agent() -> AgentId {
@@ -31,10 +32,10 @@ fn intent(minor: u128, to: Address) -> Intent<Proposed> {
             address: to,
         },
         None,
-        "key-1".into(),
+        "key-1".parse().unwrap(),
         Provenance {
             run: RunId::new(Uuid::from_u128(3)),
-            tool_call: "call-1".into(),
+            tool_call: "call-1".parse().unwrap(),
         },
         Timestamp::UNIX_EPOCH,
     )
@@ -126,7 +127,7 @@ fn quiet_hours_need_approval() {
     p.rules.push(Rule::QuietHours {
         from: jiff::civil::time(22, 0, 0, 0),
         to: jiff::civil::time(7, 0, 0, 0),
-        tz: "UTC".into(),
+        tz: "UTC".parse().unwrap(),
     });
     let d = eval(Some(&p), &intent(1, acme()), &spend(0, 0));
     assert!(matches!(d, Decision::RequireApproval { .. }));
@@ -139,9 +140,10 @@ proptest! {
     }
 
     #[test]
-    fn unknown_recipient_never_passes(addr in "[A-Za-z0-9]{1,44}", minor in 0u128..1_000) {
-        prop_assume!(addr != "Acme111");
-        let d = eval(Some(&policy()), &intent(minor, Address::SolPubkey(addr)), &spend(0, 0));
+    fn unknown_recipient_never_passes(addr in proptest::array::uniform32(any::<u8>()), minor in 0u128..1_000) {
+        prop_assume!(addr != [1; 32]);
+        let to = Address::SolPubkey(SolAddress::from_bytes(addr));
+        let d = eval(Some(&policy()), &intent(minor, to), &spend(0, 0));
         prop_assert!(denied(&d));
     }
 

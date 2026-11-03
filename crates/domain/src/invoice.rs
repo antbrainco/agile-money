@@ -3,7 +3,7 @@
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
-use crate::{Amount, Error, InvoiceId, RailId};
+use crate::{Amount, EmailAddress, Error, InvoiceId, RailId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LineItem {
@@ -15,13 +15,20 @@ pub struct LineItem {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Invoice {
     pub id: InvoiceId,
-    /// Client name.
-    pub to: String,
+    pub to: Client,
     pub lines: Vec<LineItem>,
     pub total: Amount,
     pub rail: RailId,
     pub state: InvoiceState,
     pub due: Option<Timestamp>,
+}
+
+/// Who an invoice bills. They pay us, so there is no payout address here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Client {
+    pub name: String,
+    /// Where the invoice is sent, when it goes by email.
+    pub email: Option<EmailAddress>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

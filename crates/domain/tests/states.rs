@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)] // helpers outside #[test] fns, which clippy.toml does not cover
+
 use jiff::Timestamp;
 use proptest::prelude::*;
 use uuid::Uuid;
@@ -8,7 +10,7 @@ fn usdc(minor: u128) -> Amount {
         minor,
         Asset {
             rail: RailId::Sol,
-            code: "USDC".into(),
+            code: "USDC".parse().unwrap(),
             decimals: 6,
             contract: None,
         },
@@ -22,13 +24,13 @@ fn intent(minor: u128, memo: Option<&str>) -> Intent<Proposed> {
         usdc(minor),
         Recipient {
             label: "Acme Ltd".into(),
-            address: Address::SolPubkey("Acme111".into()),
+            address: Address::SolPubkey(SolAddress::from_bytes([1; 32])),
         },
         memo.map(String::from),
-        "key-1".into(),
+        "key-1".parse().unwrap(),
         Provenance {
             run: RunId::new(Uuid::from_u128(3)),
-            tool_call: "call-1".into(),
+            tool_call: "call-1".parse().unwrap(),
         },
         Timestamp::UNIX_EPOCH,
     )
@@ -36,7 +38,7 @@ fn intent(minor: u128, memo: Option<&str>) -> Intent<Proposed> {
 
 fn rail_ref() -> RailRef {
     RailRef::Sol {
-        reference: "ref".into(),
+        reference: SolAddress::from_bytes([2; 32]),
         signature: None,
     }
 }
@@ -150,4 +152,48 @@ proptest! {
         prop_assume!(a != b);
         prop_assert_ne!(intent(a, None).hash().unwrap(), intent(b, None).hash().unwrap());
     }
+}
+
+#[test]
+fn approved_intent_rebuilds_from_history() {
+    let i = intent(100, Some("rent"));
+    let events = [
+        i.proposed_event().unwrap(),
+        Event::IntentDecided {
+            intent: i.id,
+            decision: Decision::Allow,
+            policy: PolicyId::new(Uuid::from_u128(9)),
+            version: 1,
+        },
+    ];
+    let (approved, state) = Intent::<Approved>::from_history(i.id, &events).unwrap();
+    assert_eq!(state, IntentState::Approved);
+    assert_eq!(approved.hash().unwrap(), i.hash().unwrap());
+}
+
+#[test]
+fn undecided_intent_does_not_rebuild_as_approved() {
+    let i = intent(100, None);
+    let events = [i.proposed_event().unwrap()];
+    assert!(Intent::<Approved>::from_history(i.id, &events).is_err());
+}
+
+#[test]
+fn tampered_proposal_is_rejected() {
+    let i = intent(100, None);
+    let Event::IntentProposed {
+        intent: id,
+        hash,
+        mut proposal,
+    } = i.proposed_event().unwrap()
+    else {
+        unreachable!()
+    };
+    proposal.amount.minor = 999;
+    let events = [Event::IntentProposed {
+        intent: id,
+        hash,
+        proposal,
+    }];
+    assert!(Intent::<Proposed>::from_history(id, &events).is_err());
 }

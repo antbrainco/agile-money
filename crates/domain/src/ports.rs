@@ -5,13 +5,13 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
-use jiff::Timestamp;
+use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    Approved, Asset, Event, EventEnvelope, Intent, IntentId, Invoice, PaymentRequest, RailId,
-    Settlement, StreamId, Submission,
+    AgentId, ApprovalId, Approved, Asset, Event, EventEnvelope, IdempotencyKey, Intent, IntentId,
+    Invoice, PaymentRequest, Policy, RailId, Settlement, SpendSnapshot, StreamId, Submission,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -77,9 +77,9 @@ impl OutboxCommand {
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error("stream {0} changed concurrently")]
-    Conflict(String),
+    Conflict(StreamId),
     #[error("duplicate idempotency key {0}")]
-    Duplicate(String),
+    Duplicate(IdempotencyKey),
     #[error("storage backend: {0}")]
     Backend(String),
 }
@@ -99,6 +99,51 @@ pub trait EventStore: Send + Sync {
     ) -> Result<Vec<EventEnvelope>, StoreError>;
 
     async fn load(&self, stream: &StreamId) -> Result<Vec<EventEnvelope>, StoreError>;
+}
+
+/// An outbox row leased to one executor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutboxJob {
+    pub id: i64,
+    pub command: OutboxCommand,
+    /// Including this claim.
+    pub attempts: u32,
+}
+
+/// The executor's side of the outbox. Claims are leases, so a crashed worker's
+/// job comes back once `lease` runs out.
+#[cfg_attr(feature = "mock", mockall::automock)]
+#[async_trait]
+pub trait Outbox: Send + Sync {
+    async fn claim(&self, lease: SignedDuration) -> Result<Option<OutboxJob>, StoreError>;
+    async fn complete(&self, id: i64) -> Result<(), StoreError>;
+    async fn retry_later(&self, id: i64, delay: SignedDuration) -> Result<(), StoreError>;
+}
+
+/// Projections the policy pipeline reads instead of replaying every stream.
+#[cfg_attr(feature = "mock", mockall::automock)]
+#[async_trait]
+pub trait ReadModel: Send + Sync {
+    /// Latest policy version for an agent.
+    async fn policy(&self, agent: AgentId) -> Result<Option<Policy>, StoreError>;
+
+    /// Spend in `asset` for intents created at or after `since`.
+    async fn spend(
+        &self,
+        agent: AgentId,
+        asset: &Asset,
+        since: Timestamp,
+    ) -> Result<SpendSnapshot, StoreError>;
+
+    /// The intent an idempotency key already belongs to.
+    async fn intent_by_key(&self, key: &IdempotencyKey) -> Result<Option<IntentId>, StoreError>;
+
+    /// Intents waiting on a human, for the expiry sweeper.
+    async fn awaiting_approval(&self) -> Result<Vec<IntentId>, StoreError>;
+
+    /// The intent an approval was requested for. Lets approval buttons carry
+    /// only the approval id (Telegram allows 64 bytes of callback data).
+    async fn approval_intent(&self, approval: ApprovalId) -> Result<Option<IntentId>, StoreError>;
 }
 
 #[cfg_attr(feature = "mock", mockall::automock)]

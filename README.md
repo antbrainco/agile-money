@@ -46,6 +46,33 @@ Store tests use `#[sqlx::test]`, which creates a throwaway database per test fro
 
 Apps build one rail per Cargo feature, e.g. `cargo run -p warden-shop --no-default-features --features paypal`.
 
+## Run the Telegram demo (Solana devnet)
+
+1. Create a bot with @BotFather and put its token in `.env` as `TELOXIDE_TOKEN`.
+2. Put your DeepSeek key in `.env` as `DEEPSEEK_API_KEY`.
+3. Make a devnet wallet and paste the printed line into `.env`. Then fund the address at
+   https://faucet.solana.com:
+
+   ```bash
+   cargo run -p warden-rail-sol --example keygen
+   ```
+
+4. Start the bot and send it `/start`. It replies with your chat id. Set that id as
+   `WARDEN_TELEGRAM__OWNER_CHAT_ID` and restart.
+5. Edit `[[contacts]]` and `[policy]` in `warden.toml`, then chat: "pay Bob 0.01 SOL for lunch".
+   Payments above `approval_above` wait for your Approve tap. Each confirmed payment links to the
+   devnet explorer.
+
+```bash
+cargo run -p warden-telegram-bot
+```
+
+The rail's live test sends 1000 lamports to its own wallet and checks that a retry doesn't pay twice:
+
+```bash
+cargo test -p warden-rail-sol --features live --test live -- --nocapture
+```
+
 ## Licence
 
 Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

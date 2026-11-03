@@ -2,17 +2,28 @@
 //! First `Deny` wins, then any `RequireApproval`, else `Allow`. Rules are pure functions.
 
 use async_trait::async_trait;
-use jiff::{Timestamp, civil::Time, tz::TimeZone};
+use jiff::{Timestamp, civil::Time};
 use warden_domain::{
     Amount, Approval, Approved, Decision, Intent, Policy, Proposed, Rule, SpendSnapshot,
+    TimeZoneName,
 };
+
+mod pipeline;
+
+pub use pipeline::{Payments, Proposed as ProposeOutcome, Resolution};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
     Domain(#[from] warden_domain::Error),
+    #[error(transparent)]
+    Store(#[from] warden_domain::ports::StoreError),
     #[error("approval channel unavailable: {0}")]
     Channel(String),
+    #[error("no approval {0} on this intent")]
+    UnknownApproval(String),
+    #[error("intent is {0}, not awaiting approval")]
+    NotAwaiting(&'static str),
 }
 
 /// Sends approval requests to a human (Telegram and the dashboard at once; rule 8).
@@ -136,11 +147,8 @@ fn check(
     }
 }
 
-fn quiet_hours(now: Timestamp, from: Time, to: Time, tz: &str) -> Decision {
-    let Ok(zone) = TimeZone::get(tz) else {
-        return deny(format!("unknown time zone {tz}"));
-    };
-    if in_window(now.to_zoned(zone).time(), from, to) {
+fn quiet_hours(now: Timestamp, from: Time, to: Time, tz: &TimeZoneName) -> Decision {
+    if in_window(now.to_zoned(tz.zone()).time(), from, to) {
         require("inside quiet hours")
     } else {
         Decision::Allow

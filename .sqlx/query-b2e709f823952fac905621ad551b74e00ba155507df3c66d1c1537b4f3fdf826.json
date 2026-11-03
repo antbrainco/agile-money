@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT intent_id FROM intents_view WHERE state = 'awaiting_approval' ORDER BY created_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "intent_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "intents_view",
+            "name": "intent_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b2e709f823952fac905621ad551b74e00ba155507df3c66d1c1537b4f3fdf826"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE outbox SET next_at = now() + make_interval(secs => $2), locked_until = NULL\n               WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bdd2c9dfc826fb310f8bb91eb2157c73cae196bdafa9cdf4afb30853425ed3f5"
+}

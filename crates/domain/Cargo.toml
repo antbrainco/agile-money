@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 async-trait.workspace = true
+bs58.workspace = true
 hex.workspace = true
 jiff.workspace = true
 mockall = { workspace = true, optional = true }

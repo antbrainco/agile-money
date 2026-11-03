@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE outbox\n               SET locked_until = now() + make_interval(secs => $1), attempts = attempts + 1\n               WHERE id = (\n                   SELECT id FROM outbox\n                   WHERE done_at IS NULL AND next_at <= now()\n                     AND (locked_until IS NULL OR locked_until < now())\n                   ORDER BY id\n                   FOR UPDATE SKIP LOCKED\n                   LIMIT 1\n               )\n               RETURNING id, body, attempts",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "outbox",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "body",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "outbox",
+            "name": "body"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "attempts",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "outbox",
+            "name": "attempts"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "54fc75629edd26b8e70e8d40522cab1c1619b6c610d161f11b3892ccf0fc92a0"
+}

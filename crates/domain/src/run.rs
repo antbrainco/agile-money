@@ -40,7 +40,7 @@ impl RunState {
             (S::CallingTools, T::ToolResults) => Ok(S::Thinking),
             (S::CallingTools, T::NeedsApproval) => Ok(S::WaitingOnHuman),
             (S::WaitingOnHuman, T::ApprovalResolved) => Ok(S::Thinking),
-            (S::Thinking, T::FinalAnswer) => Ok(S::Done),
+            (S::Started | S::Thinking, T::FinalAnswer) => Ok(S::Done),
             (from, trigger) => Err(Error::illegal("run", from, trigger)),
         }
     }

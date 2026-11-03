@@ -3,7 +3,7 @@
 use jiff::{SignedDuration, Timestamp, civil::Time};
 use serde::{Deserialize, Serialize};
 
-use crate::{Address, AgentId, Amount, Asset, PolicyId};
+use crate::{Address, AgentId, Amount, Asset, PolicyId, TimeZoneName};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Policy {
@@ -36,8 +36,7 @@ pub enum Rule {
     QuietHours {
         from: Time,
         to: Time,
-        /// IANA time zone name, e.g. "Europe/London".
-        tz: String,
+        tz: TimeZoneName,
     },
 }
 

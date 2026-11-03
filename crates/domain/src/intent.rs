@@ -7,7 +7,9 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{AgentId, Amount, Decision, Error, Event, IntentId, Recipient, RunId};
+use crate::{
+    AgentId, Amount, Decision, Error, Event, IdempotencyKey, IntentId, Recipient, RunId, ToolCallId,
+};
 
 /// Submissions allowed before an intent is abandoned.
 pub const MAX_SUBMIT_ATTEMPTS: u8 = 5;
@@ -24,7 +26,7 @@ pub struct Approved;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Provenance {
     pub run: RunId,
-    pub tool_call: String,
+    pub tool_call: ToolCallId,
 }
 
 /// sha256 over rail, asset, amount, recipient and memo, hex-encoded. Approvals bind to it (rule 7).
@@ -45,7 +47,7 @@ pub struct Intent<S> {
     pub amount: Amount,
     pub to: Recipient,
     pub memo: Option<String>,
-    pub idempotency_key: String,
+    pub idempotency_key: IdempotencyKey,
     pub source: Provenance,
     pub created_at: Timestamp,
     state: PhantomData<S>,
@@ -82,7 +84,98 @@ impl<S> Intent<S> {
     }
 }
 
+/// An intent's data without its typestate, as stored in `IntentProposed`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Proposal {
+    pub agent: AgentId,
+    pub amount: Amount,
+    pub to: Recipient,
+    pub memo: Option<String>,
+    pub idempotency_key: IdempotencyKey,
+    pub source: Provenance,
+    pub created_at: Timestamp,
+}
+
+impl<S> Intent<S> {
+    /// The `IntentProposed` event for this intent.
+    pub fn proposed_event(&self) -> Result<Event, Error> {
+        Ok(Event::IntentProposed {
+            intent: self.id,
+            hash: self.hash()?,
+            proposal: Proposal {
+                agent: self.agent,
+                amount: self.amount.clone(),
+                to: self.to.clone(),
+                memo: self.memo.clone(),
+                idempotency_key: self.idempotency_key.clone(),
+                source: self.source.clone(),
+                created_at: self.created_at,
+            },
+        })
+    }
+}
+
+/// Finds the proposal in a stream and checks it still matches its recorded hash.
+fn proposal<'a>(
+    id: IntentId,
+    events: impl IntoIterator<Item = &'a Event>,
+) -> Result<Intent<Proposed>, Error> {
+    let (hash, p) = events
+        .into_iter()
+        .find_map(|e| match e {
+            Event::IntentProposed {
+                intent,
+                hash,
+                proposal,
+            } if *intent == id => Some((hash, proposal)),
+            _ => None,
+        })
+        .ok_or(Error::MissingProposal(id))?;
+    let intent = Intent::new(
+        id,
+        p.agent,
+        p.amount.clone(),
+        p.to.clone(),
+        p.memo.clone(),
+        p.idempotency_key.clone(),
+        p.source.clone(),
+        p.created_at,
+    );
+    if intent.hash()? != *hash {
+        return Err(Error::TamperedProposal);
+    }
+    Ok(intent)
+}
+
+impl Intent<Approved> {
+    /// Rebuild an approved intent from its event stream. Succeeds only when the
+    /// replayed state says policy or a human cleared it and it can still be sent
+    /// or watched: `Approved`, `Submitted` or a retryable `Failed`.
+    pub fn from_history<'a, I>(id: IntentId, events: I) -> Result<(Self, IntentState), Error>
+    where
+        I: IntoIterator<Item = &'a Event>,
+        I::IntoIter: Clone,
+    {
+        let events = events.into_iter();
+        let state = IntentState::replay(events.clone())?;
+        match state {
+            IntentState::Approved | IntentState::Submitted { .. } => {}
+            IntentState::Failed { attempts } if attempts < MAX_SUBMIT_ATTEMPTS => {}
+            _ => return Err(Error::NotAllowed),
+        }
+        Ok((proposal(id, events)?.cast(), state))
+    }
+}
+
 impl Intent<Proposed> {
+    /// Rebuild a proposed intent from its event stream, e.g. to grant an approval.
+    pub fn from_history<'a>(
+        id: IntentId,
+        events: impl IntoIterator<Item = &'a Event>,
+    ) -> Result<Self, Error> {
+        proposal(id, events)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: IntentId,
@@ -90,7 +183,7 @@ impl Intent<Proposed> {
         amount: Amount,
         to: Recipient,
         memo: Option<String>,
-        idempotency_key: String,
+        idempotency_key: IdempotencyKey,
         source: Provenance,
         created_at: Timestamp,
     ) -> Self {
@@ -127,7 +220,8 @@ pub enum IntentState {
     Proposed,
     AwaitingApproval,
     Approved,
-    /// Carries the attempt count so `Failed` can tell a retry from the final attempt.
+    /// Both carry the number of submit attempts so far, so the executor can tell
+    /// a retry from the final attempt.
     Submitted {
         attempts: u8,
     },
@@ -149,6 +243,8 @@ impl IntentState {
                 Decision::RequireApproval { .. } => S::AwaitingApproval,
                 Decision::Deny { .. } => S::Denied,
             },
+            // Records who was asked; the state already says we are waiting.
+            (S::AwaitingApproval, Event::ApprovalRequested { .. }) => S::AwaitingApproval,
             (S::AwaitingApproval, Event::ApprovalGranted { .. }) => S::Approved,
             (S::AwaitingApproval, Event::ApprovalRejected { .. }) => S::Rejected,
             (S::Approved, Event::PaymentSubmitted { .. }) => S::Submitted { attempts: 1 },
@@ -156,6 +252,15 @@ impl IntentState {
                 if attempts < MAX_SUBMIT_ATTEMPTS =>
             {
                 S::Submitted {
+                    attempts: attempts + 1,
+                }
+            }
+            // The send itself failed, so nothing reached the chain; still an attempt.
+            (S::Approved, Event::PaymentFailed { .. }) => S::Failed { attempts: 1 },
+            (S::Failed { attempts }, Event::PaymentFailed { .. })
+                if attempts < MAX_SUBMIT_ATTEMPTS =>
+            {
+                S::Failed {
                     attempts: attempts + 1,
                 }
             }
@@ -175,6 +280,21 @@ impl IntentState {
             .try_fold(IntentState::Proposed, |state, event| {
                 state.transition(event)
             })
+    }
+
+    /// Lowercase name, as stored in `intents_view.state`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Proposed => "proposed",
+            Self::AwaitingApproval => "awaiting_approval",
+            Self::Approved => "approved",
+            Self::Submitted { .. } => "submitted",
+            Self::Failed { .. } => "failed",
+            Self::Confirmed => "confirmed",
+            Self::Denied => "denied",
+            Self::Rejected => "rejected",
+            Self::Abandoned => "abandoned",
+        }
     }
 
     pub fn is_terminal(self) -> bool {

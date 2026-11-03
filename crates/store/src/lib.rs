@@ -2,6 +2,9 @@
 //! `PgStore` implements [`warden_domain::ports::EventStore`] with compile-time checked queries.
 
 mod event_store;
+mod outbox;
+mod projection;
+mod read_model;
 
 use std::str::FromStr;
 use std::time::Duration;

@@ -9,7 +9,10 @@ pub enum Error {
         trigger: String,
     },
     #[error("asset mismatch: expected {expected}, got {actual}")]
-    AssetMismatch { expected: String, actual: String },
+    AssetMismatch {
+        expected: Box<crate::Asset>,
+        actual: Box<crate::Asset>,
+    },
     #[error("amount overflow")]
     Overflow,
     #[error("approval does not bind to this intent")]
@@ -18,6 +21,12 @@ pub enum Error {
     ApprovalExpired,
     #[error("decision is not allow")]
     NotAllowed,
+    #[error("intent {0} has no proposal in its stream")]
+    MissingProposal(crate::IntentId),
+    #[error("stored intent hash does not match its proposal")]
+    TamperedProposal,
+    #[error(transparent)]
+    Invalid(#[from] crate::InvalidValue),
     #[error("hashing intent failed: {0}")]
     Hash(#[from] serde_json::Error),
 }

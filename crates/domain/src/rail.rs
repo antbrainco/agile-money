@@ -3,7 +3,10 @@
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
-use crate::IntentId;
+use crate::{
+    BchTxid, ConcordiumTxHash, IdempotencyKey, IntentId, NearTxHash, PaypalOrderId, SolAddress,
+    SolSignature,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaymentRequest {
@@ -27,26 +30,29 @@ pub enum Settlement {
     Failed { reason: String },
 }
 
-/// Chain values stay base58/hex strings so the core never imports a chain SDK.
+/// Each rail's native dedupe handle. The types check encoding and length
+/// without the core importing a chain SDK.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RailRef {
     Sol {
-        reference: String,
-        signature: Option<String>,
+        /// The Solana Pay reference key added to the transfer.
+        reference: SolAddress,
+        signature: Option<SolSignature>,
     },
     Paypal {
-        order_id: String,
-        request_id: String,
+        order_id: PaypalOrderId,
+        /// Sent as `PayPal-Request-Id`, so PayPal dedupes retries too.
+        request_id: IdempotencyKey,
     },
     Near {
-        tx_hash: Option<String>,
+        tx_hash: Option<NearTxHash>,
         nonce: u64,
     },
     Bch {
-        txid: Option<String>,
+        txid: Option<BchTxid>,
     },
     Concordium {
-        tx_hash: Option<String>,
+        tx_hash: Option<ConcordiumTxHash>,
     },
 }
