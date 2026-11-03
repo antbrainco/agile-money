@@ -2,11 +2,12 @@
 
 use jiff::SignedDuration;
 use uuid::Uuid;
+use warden_agent_core::Briefing;
 use warden_domain::ports::ReadModel;
 use warden_domain::{Address, AgentId, Policy, PolicyId, Recipient, Rule, UserId};
 use warden_store::PgStore;
 
-use crate::config::{Config, Contact};
+use crate::config::{Config, Contact, Network};
 
 /// "tilly" in ASCII, so ids derived from a chat are recognisable.
 const NAMESPACE: u64 = 0x7469_6c6c_7900_0000;
@@ -32,6 +33,32 @@ pub fn recipients(contacts: &[Contact]) -> Vec<Recipient> {
             address: Address::SolPubkey(c.address),
         })
         .collect()
+}
+
+/// What the agent is told about this deployment. Mirrors `rules`; the policy enforces it.
+pub fn briefing(config: &Config) -> Briefing {
+    let limits = &config.policy;
+    let network = match config.network {
+        Network::Devnet => "Solana devnet",
+        Network::Testnet => "Solana testnet",
+        Network::Mainnet => "Solana mainnet",
+    };
+    Briefing {
+        network: network.into(),
+        assets: vec![warden_rail_sol::sol().code.to_string()],
+        limits: vec![
+            "Only saved contacts can be paid; any other address is denied.".into(),
+            format!(
+                "Payments above {} need the owner's approval.",
+                limits.approval_above.0
+            ),
+            format!("No single payment may exceed {}.", limits.max_per_tx.0),
+            format!(
+                "No more than {} in total per rolling 24 hours.",
+                limits.max_per_day.0
+            ),
+        ],
+    }
 }
 
 fn rules(config: &Config) -> Vec<Rule> {

@@ -80,7 +80,8 @@ async fn main() -> anyhow::Result<()> {
         clock,
         ids,
     )
-    .with_step_limit(config.agent.step_limit);
+    .with_step_limit(config.agent.step_limit)
+    .with_briefing(setup::briefing(&config));
 
     let pause = PauseSwitch::default();
     let executor = Executor::new(
