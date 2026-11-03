@@ -5,7 +5,7 @@ use figment::Figment;
 use figment::providers::{Env, Format, Toml};
 use secrecy::SecretString;
 use serde::Deserialize;
-use warden_agent_core::Provider;
+use warden_agent_core::LlmSettings;
 use warden_agent_core::tools::parse_major;
 use warden_domain::{Amount, SolAddress};
 use warden_executor::ExecConfig;
@@ -44,15 +44,14 @@ pub struct TelegramConfig {
     pub owner_chat_id: i64,
 }
 
+/// `[agent]`: the loop's step limit plus the model client's settings
+/// (provider, model, endpoint or gateway, and per-provider sections).
 #[derive(Debug, Deserialize)]
 pub struct AgentConfig {
-    pub provider: Provider,
-    /// Rig catalog reference; defaults to the provider's default model.
-    pub model: Option<String>,
     #[serde(default = "step_limit")]
     pub step_limit: u32,
-    /// Falls back to the provider's own variable, e.g. `DEEPSEEK_API_KEY`.
-    pub api_key: Option<SecretString>,
+    #[serde(flatten)]
+    pub llm: LlmSettings,
 }
 
 fn step_limit() -> u32 {
@@ -140,6 +139,19 @@ impl Config {
                     .map(|_| "telegram.token".into()),
             )
             .extract()?;
+        Self::finish(config)
+    }
+
+    fn finish(mut config: Self) -> anyhow::Result<Self> {
+        // Picks the provider when `agent.provider` is unset, and fills its key
+        // from the provider's own variable, e.g. DEEPSEEK_API_KEY.
+        let found = config.agent.llm.detect(|var| std::env::var(var).ok())?;
+        tracing::info!(
+            active = ?found.active,
+            source = ?found.source,
+            available = ?found.available,
+            "model provider"
+        );
         // Rule 5: real money needs both the global network and the rail's own opt-in.
         if config.network == Network::Mainnet && !config.rail.sol.mainnet {
             anyhow::bail!("network = \"mainnet\" also needs rail.sol.mainnet = true");
@@ -181,6 +193,38 @@ mod tests {
         assert_eq!(amount("2").unwrap().0.minor, 2_000_000_000);
         assert!(amount("0.05").is_none(), "float");
         assert!(amount("\"0.0000000001\"").is_none(), "below a lamport");
+    }
+
+    #[test]
+    fn agent_section_carries_provider_settings() {
+        let toml = r#"
+            step_limit = 5
+            provider = "claude"
+            model = "claude-sonnet-5-5"
+            max_tokens = 2048
+            [gateway]
+            account_id = "acct"
+            [anthropic]
+            thinking_budget = 1024
+            betas = ["x"]
+            [http]
+            max_retries = 4
+            [extra_body]
+            metadata = { user_id = "tilly" }
+        "#;
+        let agent: AgentConfig = Figment::from(Toml::string(toml)).extract().unwrap();
+        assert_eq!(agent.step_limit, 5);
+        let llm = agent.llm;
+        assert_eq!(llm.anthropic.thinking_budget, Some(1024));
+        assert_eq!(llm.anthropic.version, "2023-06-01");
+        assert_eq!(llm.http.max_retries, 4);
+        assert_eq!(llm.http.retry_base_ms, 500, "defaults fill the rest");
+        assert!(llm.stream);
+        assert_eq!(llm.extra_body["metadata"]["user_id"], "tilly");
+        assert_eq!(
+            llm.base_url().unwrap().as_str(),
+            "https://gateway.ai.cloudflare.com/v1/acct/default/anthropic/"
+        );
     }
 
     #[test]

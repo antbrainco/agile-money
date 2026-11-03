@@ -18,8 +18,40 @@ retry_delay_ms = 90000 # longer than a blockhash lives
 watch_delay_ms = 2000
 
 [agent] # key comes from the provider's own variable, e.g. DEEPSEEK_API_KEY
-provider = "deepseek" # claude | openai | deepseek
+# Unset: detected. A base_url means `compatible`; otherwise the first key found among
+# DEEPSEEK_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY picks deepseek, claude or openai.
+# provider = "deepseek"         # deepseek | claude | openai | compatible
 step_limit = 12
+# model = "deepseek-flash"      # defaults per provider; required for `compatible`
+# base_url = "http://localhost:11434/v1"  # any OpenAI-compatible endpoint
+# stream = true                 # SSE; replies appear in Telegram as they're written
+# max_tokens = 2048
+# extra_body = { }              # merged into every request body
+
+[agent.http]
+connect_timeout_ms = 10000
+read_timeout_ms = 60000         # longest silence mid-stream
+request_timeout_ms = 120000     # whole call, non-streaming only
+max_retries = 2                 # on 408/409/429/5xx and connect errors, honouring Retry-After
+
+# Route through Cloudflare AI Gateway. Exclusive with base_url. For an authenticated
+# gateway set WARDEN_AGENT__GATEWAY__TOKEN; with stored keys (BYOK) the API key is optional.
+# [agent.gateway]
+# account_id = "your-account-id"
+# gateway_id = "default"
+
+# [agent.headers]               # extra non-secret headers, e.g. gateway options
+# cf-aig-collect-log-payload = "false"
+
+# [agent.openai]
+# organization = "org-..."
+# project = "proj_..."
+# reasoning_effort = "low"
+
+# [agent.anthropic]
+# version = "2023-06-01"
+# betas = []
+# thinking_budget = 1024        # below max_tokens
 
 [rail.sol] # keypair comes from WARDEN_RAIL__SOL__KEYPAIR
 rpc_url = "https://api.devnet.solana.com"

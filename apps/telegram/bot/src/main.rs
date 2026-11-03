@@ -12,7 +12,7 @@ use secrecy::ExposeSecret;
 use teloxide::prelude::*;
 use tracing_subscriber::EnvFilter;
 use warden_agent_core::tools::{ListContacts, PaymentStatus, ProposePayment};
-use warden_agent_core::{Agent, DynTool, RigLlm};
+use warden_agent_core::{Agent, DynTool};
 use warden_domain::ports::{IdGen, Rail, SystemClock, UuidV7};
 use warden_executor::{Executor, PauseSwitch};
 use warden_policy::Payments;
@@ -59,12 +59,9 @@ async fn main() -> anyhow::Result<()> {
         ids.clone(),
     );
 
-    let model = config
-        .agent
-        .model
-        .clone()
-        .unwrap_or_else(|| config.agent.provider.default_model().to_owned());
-    let llm = Arc::new(RigLlm::connect(&model, config.agent.api_key.as_ref())?);
+    let llm = config.agent.llm.client()?;
+    let (model, endpoint) = (llm.model().to_owned(), llm.endpoint().clone());
+    let llm = Arc::new(llm);
     let contacts = setup::recipients(&config.contacts);
     let tools: Vec<Arc<dyn DynTool>> = vec![
         Arc::new(ProposePayment::new(
@@ -115,6 +112,8 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!(
         %model,
+        // Host and path only: a custom base_url may carry a key in its query.
+        llm = %format_args!("{}{}", endpoint.host_str().unwrap_or_default(), endpoint.path()),
         ?cluster,
         wallet = %rail.address(),
         policy_version = policy.version,

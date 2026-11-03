@@ -1,11 +1,15 @@
 //! The agent loop: model replies drive a `RunState`, and tools can read or propose, never pay.
-//! Providers (DeepSeek, OpenAI, Claude) plug in through the `Llm` port via Rig adapters.
+//! Providers (DeepSeek, OpenAI, Claude, anything OpenAI-compatible) plug in
+//! through the `Llm` port; [`llm::LlmClient`] implements it over HTTP.
 
 mod agent;
-mod rig;
+pub mod llm;
 pub mod tools;
 
+use std::pin::Pin;
+
 use async_trait::async_trait;
+use futures_util::Stream;
 use jiff::Timestamp;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -13,13 +17,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use warden_domain::{AgentId, Intent, Invoice, Proposed, RunId, ToolCallId, Untrusted};
 
-pub use agent::{Agent, RunReport, SYSTEM_PROMPT};
-pub use rig::RigLlm;
+pub use agent::{Agent, NoObserver, RunObserver, RunReport, SYSTEM_PROMPT};
+pub use llm::{Detection, LlmClient, LlmSettings, Provider, Source};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("model call failed: {0}")]
     Llm(String),
+    #[error("model API returned {status}: {message}")]
+    Api { status: u16, message: String },
+    #[error(transparent)]
+    Http(#[from] llm::HttpError),
     #[error("unknown tool {0}")]
     UnknownTool(String),
     #[error("bad tool arguments: {0}")]
@@ -30,25 +38,6 @@ pub enum Error {
     Domain(#[from] warden_domain::Error),
     #[error(transparent)]
     Policy(#[from] warden_policy::Error),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Provider {
-    Deepseek,
-    Openai,
-    Claude,
-}
-
-impl Provider {
-    /// Rig catalog reference for this provider's default model.
-    pub fn default_model(self) -> &'static str {
-        match self {
-            Self::Deepseek => "deepseek/deepseek-flash",
-            Self::Openai => "openai/gpt-5.5",
-            Self::Claude => "anthropic/claude-sonnet-5-5",
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -102,10 +91,41 @@ pub struct ToolSpec {
     pub schema: Value,
 }
 
+/// One piece of a streamed reply. The stream ends with exactly one `Done`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Chunk {
+    /// Answer text as it is written.
+    Text(String),
+    /// Thinking text, from models that stream it. Never shown as the answer.
+    Reasoning(String),
+    /// The model started a tool call; its arguments are still arriving.
+    ToolCall {
+        name: String,
+    },
+    Done(Reply),
+}
+
+pub type ReplyStream = Pin<Box<dyn Stream<Item = Result<Chunk, Error>> + Send>>;
+
+/// A finished reply as a stream: its text, if final, then `Done`.
+pub fn whole(reply: Reply) -> ReplyStream {
+    let mut chunks = Vec::new();
+    if let Reply::Final { text } = &reply {
+        chunks.push(Ok(Chunk::Text(text.clone())));
+    }
+    chunks.push(Ok(Chunk::Done(reply)));
+    Box::pin(futures_util::stream::iter(chunks))
+}
+
 /// Model port. Prompts and tool schemas are provider-neutral.
 #[async_trait]
 pub trait Llm: Send + Sync {
     async fn complete(&self, messages: &[Message], tools: &[ToolSpec]) -> Result<Reply, Error>;
+
+    /// The reply as it is generated. By default, the whole reply at once.
+    async fn stream(&self, messages: &[Message], tools: &[ToolSpec]) -> Result<ReplyStream, Error> {
+        Ok(whole(self.complete(messages, tools).await?))
+    }
 }
 
 /// What a tool hands back. There is deliberately no variant that pays.

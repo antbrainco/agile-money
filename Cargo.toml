@@ -71,10 +71,10 @@ uuid = { version = "1.29.0", features = ["v7", "serde"] }
 # Runtime, I/O
 axum = "0.8.9"
 dotenvy = "0.15.7"
+futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
 jiff-sqlx = { version = "0.2.1", features = ["postgres"] }
 figment = { version = "0.10.19", features = ["toml", "env"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
-rig-core = { version = "0.46.0", features = ["reqwest"] }
 sqlx = { version = "0.9.0", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls", "macros", "migrate", "uuid", "json"] }
 solana-commitment-config = "3.1.1"
 solana-rpc-client = "4.2.2"
@@ -91,6 +91,7 @@ tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
 insta = { version = "1.49.0", features = ["json"] }
 mockall = "0.15.0"
 proptest = "1.12.0"
+wiremock = "0.6.5"
 
 [profile.release]
 lto = "thin"

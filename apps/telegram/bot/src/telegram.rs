@@ -1,11 +1,12 @@
 //! Telegram I/O: approval buttons, payment notices and the chat handlers.
 
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use teloxide::prelude::*;
-use teloxide::types::{ChatAction, InlineKeyboardButton, InlineKeyboardMarkup};
-use warden_agent_core::{Agent, Message as Turn};
+use teloxide::types::{ChatAction, InlineKeyboardButton, InlineKeyboardMarkup, MessageId};
+use warden_agent_core::{Agent, Message as Turn, RunObserver};
 use warden_domain::ports::ReadModel;
 use warden_domain::{Approval, ApprovalId, Intent, Proposed, RailRef, Untrusted, UserId};
 use warden_executor::{Notice, Notifier, PauseSwitch};
@@ -15,6 +16,10 @@ use warden_store::PgStore;
 
 /// Turns of chat history the agent sees.
 const HISTORY: usize = 10;
+/// Telegram allows about one edit a second per chat.
+const EDIT_EVERY: Duration = Duration::from_millis(1200);
+/// Below Telegram's 4096-character message limit.
+const MAX_TEXT: usize = 4000;
 
 pub struct App {
     pub owner: ChatId,
@@ -175,9 +180,10 @@ pub async fn on_message(bot: Bot, msg: Message, app: Arc<App>) -> ResponseResult
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .clone();
-            match app
+            let live = LiveReply::new(bot.clone(), app.owner);
+            let reply = match app
                 .agent
-                .run(&history, Untrusted::new(text.to_owned()))
+                .run_observed(&history, Untrusted::new(text.to_owned()), &live)
                 .await
             {
                 Ok(report) => {
@@ -188,11 +194,94 @@ pub async fn on_message(bot: Bot, msg: Message, app: Arc<App>) -> ResponseResult
                     tracing::error!(error = %e, "agent run failed");
                     "Sorry, something went wrong on my side. Try again in a moment.".to_owned()
                 }
-            }
+            };
+            return live.finish(&reply).await;
         }
     };
     bot.send_message(app.owner, reply).await?;
     Ok(())
+}
+
+/// Shows the answer while the model writes it: one message, edited at most
+/// every `EDIT_EVERY`, and set to the final text at the end.
+struct LiveReply {
+    bot: Bot,
+    chat: ChatId,
+    state: tokio::sync::Mutex<Live>,
+}
+
+#[derive(Default)]
+struct Live {
+    message: Option<MessageId>,
+    step: u32,
+    text: String,
+    shown: String,
+    last: Option<Instant>,
+}
+
+fn clip(text: &str) -> String {
+    match text.char_indices().nth(MAX_TEXT) {
+        Some((end, _)) => format!("{}…", &text[..end]),
+        None => text.to_owned(),
+    }
+}
+
+impl LiveReply {
+    fn new(bot: Bot, chat: ChatId) -> Self {
+        Self {
+            bot,
+            chat,
+            state: tokio::sync::Mutex::new(Live::default()),
+        }
+    }
+
+    async fn show(&self, live: &mut Live, text: String) -> ResponseResult<()> {
+        if text.trim().is_empty() || text == live.shown {
+            return Ok(());
+        }
+        match live.message {
+            Some(id) => {
+                self.bot
+                    .edit_message_text(self.chat, id, text.clone())
+                    .await?;
+            }
+            None => live.message = Some(self.bot.send_message(self.chat, text.clone()).await?.id),
+        }
+        live.shown = text;
+        live.last = Some(Instant::now());
+        Ok(())
+    }
+
+    async fn finish(self, reply: &str) -> ResponseResult<()> {
+        let mut live = self.state.lock().await;
+        self.show(&mut live, clip(reply)).await
+    }
+}
+
+#[async_trait]
+impl RunObserver for LiveReply {
+    async fn text(&self, step: u32, delta: &str) {
+        let mut live = self.state.lock().await;
+        if live.step != step {
+            live.step = step;
+            live.text.clear();
+        }
+        live.text.push_str(delta);
+        if live.last.is_some_and(|t| t.elapsed() < EDIT_EVERY) {
+            return;
+        }
+        let text = clip(&live.text);
+        if let Err(e) = self.show(&mut live, text).await {
+            tracing::debug!(error = %e, "live reply edit skipped");
+        }
+    }
+
+    async fn tool_call(&self, _step: u32, _name: &str) {
+        let _ = self
+            .bot
+            .send_chat_action(self.chat, ChatAction::Typing)
+            .await;
+    }
 }
 
 fn remember(app: &App, user: &str, assistant: &str) {

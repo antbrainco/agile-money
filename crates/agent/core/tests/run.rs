@@ -10,7 +10,9 @@ use jiff::Timestamp;
 use serde_json::json;
 use uuid::Uuid;
 use warden_agent_core::tools::{ListContacts, PaymentStatus, ProposePayment};
-use warden_agent_core::{Agent, DynTool, Error, Llm, Message, Reply, ToolCall, ToolSpec};
+use warden_agent_core::{
+    Agent, DynTool, Error, Llm, Message, Reply, RunObserver, ToolCall, ToolSpec,
+};
 use warden_domain::memory::MemStore;
 use warden_domain::ports::{FixedClock, OutboxCommand, SequentialIds};
 use warden_domain::*;
@@ -148,6 +150,38 @@ async fn pays_a_contact_within_policy() {
         panic!("tool result last");
     };
     assert_eq!(content["status"], "allowed");
+}
+
+/// Records what a run streams.
+#[derive(Default)]
+struct Seen(Mutex<Vec<String>>);
+
+#[async_trait]
+impl RunObserver for Seen {
+    async fn text(&self, step: u32, delta: &str) {
+        self.0.lock().unwrap().push(format!("{step}:{delta}"));
+    }
+
+    async fn tool_call(&self, step: u32, name: &str) {
+        self.0.lock().unwrap().push(format!("{step}:call {name}"));
+    }
+}
+
+#[tokio::test]
+async fn observer_sees_each_steps_text() {
+    let (agent, _, _) = setup(vec![
+        call("list_contacts", json!({})),
+        Reply::Final {
+            text: "Acme is your only contact.".into(),
+        },
+    ]);
+    let seen = Seen::default();
+    agent
+        .run_observed(&[], Untrusted::new("who can I pay?".into()), &seen)
+        .await
+        .unwrap();
+    // A model that cannot stream still reports its final text once.
+    assert_eq!(*seen.0.lock().unwrap(), ["2:Acme is your only contact."]);
 }
 
 #[tokio::test]

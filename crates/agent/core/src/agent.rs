@@ -4,12 +4,14 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
+use futures_util::StreamExt;
 use serde_json::{Value, json};
 use warden_domain::ports::{Clock, IdGen};
 use warden_domain::{AgentId, RunId, RunState, RunTrigger, STEP_LIMIT, Untrusted};
 use warden_policy::{Payments, ProposeOutcome};
 
-use crate::{DynTool, Error, Llm, Message, Reply, ToolCtx, ToolOutput, ToolSpec};
+use crate::{Chunk, DynTool, Error, Llm, Message, Reply, ToolCtx, ToolOutput, ToolSpec};
 
 pub const SYSTEM_PROMPT: &str = "\
 You are Tilly, a payments assistant for a small business owner, chatting on Telegram.
@@ -34,6 +36,21 @@ pub struct RunReport {
     /// What the policy pipeline did with each proposed payment.
     pub proposals: Vec<ProposeOutcome>,
 }
+
+/// Watches a run as it streams, e.g. to show the answer while it is written.
+/// `step` counts model calls from 1; text from a step that ends in tool calls
+/// is a preamble, not the answer.
+#[async_trait]
+pub trait RunObserver: Send + Sync {
+    async fn text(&self, _step: u32, _delta: &str) {}
+    async fn tool_call(&self, _step: u32, _name: &str) {}
+}
+
+/// Watches nothing.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoObserver;
+
+impl RunObserver for NoObserver {}
 
 pub struct Agent {
     llm: Arc<dyn Llm>,
@@ -93,11 +110,21 @@ impl Agent {
 
     /// Handles one user message. `history` holds earlier user and assistant
     /// turns of the chat, oldest first.
-    #[tracing::instrument(skip_all, fields(agent = %self.agent))]
     pub async fn run(
         &self,
         history: &[Message],
         text: Untrusted<String>,
+    ) -> Result<RunReport, Error> {
+        self.run_observed(history, text, &NoObserver).await
+    }
+
+    /// `run`, streaming each model reply to `observer` as it arrives.
+    #[tracing::instrument(skip_all, fields(agent = %self.agent))]
+    pub async fn run_observed(
+        &self,
+        history: &[Message],
+        text: Untrusted<String>,
+        observer: &dyn RunObserver,
     ) -> Result<RunReport, Error> {
         let run = RunId::new(self.ids.next_uuid());
         let specs = self.specs();
@@ -111,7 +138,7 @@ impl Agent {
         let mut state = RunState::Started;
         let mut proposals = Vec::new();
         for step in 1..=self.step_limit {
-            let reply = match self.llm.complete(&messages, &specs).await {
+            let reply = match self.reply(step, &messages, &specs, observer).await {
                 Ok(reply) => reply,
                 Err(e) => {
                     state.transition(RunTrigger::Error)?;
@@ -170,6 +197,25 @@ impl Agent {
             steps: self.step_limit,
             proposals,
         })
+    }
+
+    async fn reply(
+        &self,
+        step: u32,
+        messages: &[Message],
+        specs: &[ToolSpec],
+        observer: &dyn RunObserver,
+    ) -> Result<Reply, Error> {
+        let mut stream = self.llm.stream(messages, specs).await?;
+        while let Some(chunk) = stream.next().await {
+            match chunk? {
+                Chunk::Text(delta) => observer.text(step, &delta).await,
+                Chunk::ToolCall { name } => observer.tool_call(step, &name).await,
+                Chunk::Reasoning(_) => {}
+                Chunk::Done(reply) => return Ok(reply),
+            }
+        }
+        Err(Error::Llm("stream ended without a reply".into()))
     }
 
     async fn call_tool(

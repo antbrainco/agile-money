@@ -10,7 +10,7 @@ and anything above a threshold waits for a human. Spec: [../docs/warden-spec.md]
 | --- | --- | --- |
 | `crates/domain` | `warden-domain` | Types, events, state machines, ports. No I/O. |
 | `crates/policy` | `warden-policy` | Rule pipeline: Allow / RequireApproval / Deny |
-| `crates/agent/core` | `warden-agent-core` | LLM loop, `Llm` and `Tool` ports |
+| `crates/agent/core` | `warden-agent-core` | Agent loop, `Llm` and `Tool` ports, streaming LLM client |
 | `crates/store` | `warden-store` | Postgres event log + outbox (sqlx) |
 | `crates/executor` | `warden-executor` | The only code that signs |
 | `crates/rail/*` | `warden-rail-*` | One crate per network |
@@ -72,6 +72,32 @@ The rail's live test sends 1000 lamports to its own wallet and checks that a ret
 ```bash
 cargo test -p warden-rail-sol --features live --test live -- --nocapture
 ```
+
+## Model providers
+
+`agent.provider` in `warden.toml` names the provider: `deepseek`, `claude`, `openai`, or
+`compatible` for any OpenAI-style endpoint (set `base_url` and `model`). Leave it unset and
+it is detected at startup:
+
+1. A `base_url` means `compatible`.
+2. Otherwise the first key variable set among `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY` and
+   `OPENAI_API_KEY` picks `deepseek`, `claude` or `openai`.
+
+The startup log lists the active provider, why it was chosen, and every provider whose
+key is present. A configured `provider` always wins. Its key comes from its own variable
+or `WARDEN_AGENT__API_KEY`. A gateway or a bare `WARDEN_AGENT__API_KEY` cannot say which
+API to speak, so those need `provider` set.
+
+To go through Cloudflare AI Gateway, add `[agent.gateway]` with your `account_id` and
+`gateway_id`. Calls then go to `gateway.ai.cloudflare.com/v1/{account}/{gateway}/{provider}/`.
+For an authenticated gateway, set `WARDEN_AGENT__GATEWAY__TOKEN` (sent as
+`cf-aig-authorization`). If the gateway stores your provider key, leave the API key unset.
+With `provider = "compatible"`, the gateway's `compat` endpoint is used; give models as
+`provider/model`, e.g. `deepseek/deepseek-flash`.
+
+The client lives in `crates/agent/core/src/llm`. A `RoundTripper` stack (headers, retries,
+tracing) carries the HTTP; a `Wire` per API format builds bodies and decodes replies, whole or
+streamed over SSE.
 
 ## Licence
 
