@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+    branches: [main, "hack/**"]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: warden
+          POSTGRES_PASSWORD: warden
+          POSTGRES_DB: warden
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U warden"
+          --health-interval 2s
+          --health-retries 15
+    env:
+      DATABASE_URL: postgres://warden:warden@localhost:5432/warden
+      # Query macros build from the committed .sqlx/ cache, so a stale cache fails CI.
+      SQLX_OFFLINE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-features --all-targets
+      - run: cargo test --workspace --all-features
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2

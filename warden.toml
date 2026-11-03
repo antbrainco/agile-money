@@ -1,0 +1,27 @@
+# Non-secret config. Overridden by WARDEN_* env vars (figment); secrets never go here.
+network = "devnet" # mainnet also needs a per-rail opt-in below (rule 5)
+
+[database] # url comes from DATABASE_URL
+max_connections = 10
+acquire_timeout_ms = 5000
+statement_timeout_ms = 10000
+migrate_on_start = true
+
+[executor]
+poll_interval_ms = 500
+max_attempts = 5
+
+[approvals]
+expiry_minutes = 15
+
+[agent]
+provider = "claude" # claude | openai | deepseek
+step_limit = 12
+
+[rail.sol]
+enabled = true
+mainnet = false
+
+[rail.paypal]
+enabled = false
+mainnet = false

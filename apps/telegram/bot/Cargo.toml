@@ -1,0 +1,39 @@
+[package]
+name = "warden-telegram-bot"
+description = "Tilly's Telegram bot: chat with the agent and answer approvals."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+dotenvy.workspace = true
+teloxide.workspace = true
+figment.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+warden-agent-core.workspace = true
+warden-domain.workspace = true
+warden-executor.workspace = true
+warden-policy.workspace = true
+warden-store.workspace = true
+warden-rail-sol = { workspace = true, optional = true }
+warden-rail-paypal = { workspace = true, optional = true }
+warden-rail-near = { workspace = true, optional = true }
+warden-rail-bch = { workspace = true, optional = true }
+warden-rail-concordium = { workspace = true, optional = true }
+
+[lints]
+workspace = true
+
+[features]
+default = ["sol"]
+sol = ["dep:warden-rail-sol"]
+paypal = ["dep:warden-rail-paypal"]
+near = ["dep:warden-rail-near"]
+bch = ["dep:warden-rail-bch"]
+concordium = ["dep:warden-rail-concordium"]

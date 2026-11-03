@@ -1,0 +1,51 @@
+//! Policy data: versioned, human-edited rule lists (rule 9). Evaluation lives in `warden-policy`.
+
+use jiff::{SignedDuration, Timestamp, civil::Time};
+use serde::{Deserialize, Serialize};
+
+use crate::{Address, AgentId, Amount, Asset, PolicyId};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Policy {
+    pub id: PolicyId,
+    pub version: u32,
+    pub agent: AgentId,
+    pub rules: Vec<Rule>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Rule {
+    MaxPerTx {
+        amount: Amount,
+    },
+    /// Rolling window, e.g. 24h.
+    MaxPerWindow {
+        amount: Amount,
+        window: SignedDuration,
+    },
+    AllowRecipients {
+        addresses: Vec<Address>,
+    },
+    AllowAssets {
+        assets: Vec<Asset>,
+    },
+    ApprovalAbove {
+        amount: Amount,
+    },
+    QuietHours {
+        from: Time,
+        to: Time,
+        /// IANA time zone name, e.g. "Europe/London".
+        tz: String,
+    },
+}
+
+/// What rules read instead of the database, for the intent's asset.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpendSnapshot {
+    pub settled: Amount,
+    /// Approved or submitted, not yet confirmed (rule 3).
+    pub reserved: Amount,
+    pub window_start: Timestamp,
+}

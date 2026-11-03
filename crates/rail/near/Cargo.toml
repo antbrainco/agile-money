@@ -1,0 +1,18 @@
+[package]
+name = "warden-rail-near"
+description = "NEAR rail; caps are re-checked onchain by the guardrails contract."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+warden-domain.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+live = []

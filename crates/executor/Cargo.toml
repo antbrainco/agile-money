@@ -1,0 +1,15 @@
+[package]
+name = "warden-executor"
+description = "Outbox worker: checks pause and idempotency, signs, submits, watches."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+warden-domain.workspace = true
+
+[lints]
+workspace = true

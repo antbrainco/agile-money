@@ -1,0 +1,89 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/domain",
+    "crates/agent/core",
+    "crates/policy",
+    "crates/store",
+    "crates/executor",
+    "crates/rail/sol",
+    "crates/rail/paypal",
+    "crates/rail/near",
+    "crates/rail/bch",
+    "crates/rail/concordium",
+    "crates/scout",
+    "crates/x402",
+    "apps/telegram/bot",
+    "apps/shop",
+]
+# Onchain contracts build for their own targets (wasm, BPF) with their own toolchains.
+exclude = ["contracts"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "deny"
+todo = "warn"
+
+[workspace.dependencies]
+# Internal crates
+warden-domain = { path = "crates/domain" }
+warden-agent-core = { path = "crates/agent/core" }
+warden-policy = { path = "crates/policy" }
+warden-store = { path = "crates/store" }
+warden-executor = { path = "crates/executor" }
+warden-rail-sol = { path = "crates/rail/sol" }
+warden-rail-paypal = { path = "crates/rail/paypal" }
+warden-rail-near = { path = "crates/rail/near" }
+warden-rail-bch = { path = "crates/rail/bch" }
+warden-rail-concordium = { path = "crates/rail/concordium" }
+warden-scout = { path = "crates/scout" }
+warden-x402 = { path = "crates/x402" }
+
+# Core
+anyhow = "1.0.104"
+async-trait = "0.1.92"
+hex = "0.4.3"
+jiff = { version = "0.2.39", features = ["serde"] }
+rust_decimal = "1.43.0"
+schemars = "1.2.3"
+secrecy = { version = "0.10.3", features = ["serde"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+thiserror = "2.0.21"
+uuid = { version = "1.29.0", features = ["v7", "serde"] }
+
+# Runtime, I/O
+axum = "0.8.9"
+dotenvy = "0.15.7"
+jiff-sqlx = { version = "0.2.1", features = ["postgres"] }
+figment = { version = "0.10.19", features = ["toml", "env"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
+rig-core = "0.46.0"
+sqlx = { version = "0.9.0", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls", "macros", "migrate", "uuid", "json"] }
+teloxide = { version = "0.17.0", features = ["macros"] }
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "time", "sync", "signal"] }
+tower = { version = "0.5.3", features = ["timeout", "retry", "util"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
+
+# Testing
+insta = { version = "1.49.0", features = ["json"] }
+mockall = "0.15.0"
+proptest = "1.12.0"
+
+[profile.release]
+lto = "thin"
