@@ -142,7 +142,9 @@ fn check(
         Rule::ApprovalAbove { amount: threshold }
             if threshold.asset == amount.asset && amount.minor > threshold.minor =>
         {
-            require(format!("{amount} is above the {threshold} approval threshold"))
+            require(format!(
+                "{amount} is above the {threshold} approval threshold"
+            ))
         }
         Rule::QuietHours { from, to, tz } => quiet_hours(now, *from, *to, tz),
         _ => Decision::Allow,

@@ -41,13 +41,20 @@ async fn main() -> anyhow::Result<()> {
         store.migrate().await?;
     }
     store.ping().await?;
-    let policy = setup::seed_policy(&store, &config).await?;
+    let assets = config.assets()?;
+    let policy = setup::seed_policy(&store, &config, &assets).await?;
 
     let bot = Bot::new(config.telegram.token.expose_secret());
     let owner = ChatId(config.telegram.owner_chat_id);
-    let rail = Arc::new(SolRail::new(&config.rail.sol.conn)?);
+    let tokens = assets
+        .iter()
+        .map(|a| a.asset.clone())
+        .filter(|a| a.contract.is_some())
+        .collect();
+    let rail = Arc::new(SolRail::new(&config.rail.sol.conn)?.with_tokens(tokens)?);
     let cluster = rail.cluster().await?;
     config.check_cluster(cluster)?;
+    rail.check_tokens().await?;
     let clock = Arc::new(SystemClock);
     let ids: Arc<dyn IdGen> = Arc::new(UuidV7);
     let store_arc = Arc::new(store.clone());
@@ -70,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
     let tools: Vec<Arc<dyn DynTool>> = vec![
         Arc::new(ProposePayment::new(
             contacts.clone(),
-            vec![warden_rail_sol::sol()],
+            rail.assets(),
             ids.clone(),
         )),
         Arc::new(ListContacts::new(contacts.clone())),
@@ -85,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
         ids,
     )
     .with_step_limit(config.agent.step_limit)
-    .with_briefing(setup::briefing(&config));
+    .with_briefing(setup::briefing(&config, &assets));
 
     let pause = PauseSwitch::default();
     let turn = ChatTurn::default();

@@ -7,7 +7,7 @@ use warden_domain::ports::ReadModel;
 use warden_domain::{Address, AgentId, Policy, PolicyId, Recipient, Rule, UserId};
 use warden_store::PgStore;
 
-use crate::config::{Config, Contact, Network};
+use crate::config::{AssetPolicy, Config, Contact, Network};
 
 /// "tilly" in ASCII, so ids derived from a chat are recognisable.
 const NAMESPACE: u64 = 0x7469_6c6c_7900_0000;
@@ -36,36 +36,31 @@ pub fn recipients(contacts: &[Contact]) -> Vec<Recipient> {
 }
 
 /// What the agent is told about this deployment. Mirrors `rules`; the policy enforces it.
-pub fn briefing(config: &Config) -> Briefing {
-    let limits = &config.policy;
+pub fn briefing(config: &Config, assets: &[AssetPolicy]) -> Briefing {
     let network = match config.network {
         Network::Devnet => "Solana devnet",
         Network::Testnet => "Solana testnet",
         Network::Mainnet => "Solana mainnet",
     };
+    let mut limits = vec!["Only saved contacts can be paid; any other address is denied.".into()];
+    for a in assets {
+        limits.push(format!(
+            "{}: payments above {} need the owner's approval; no single payment may exceed {}; \
+             no more than {} in total per rolling 24 hours.",
+            a.asset.code, a.approval_above, a.max_per_tx, a.max_per_day
+        ));
+    }
     Briefing {
         network: network.into(),
-        assets: vec![warden_rail_sol::sol().code.to_string()],
-        limits: vec![
-            "Only saved contacts can be paid; any other address is denied.".into(),
-            format!(
-                "Payments above {} need the owner's approval.",
-                limits.approval_above.0
-            ),
-            format!("No single payment may exceed {}.", limits.max_per_tx.0),
-            format!(
-                "No more than {} in total per rolling 24 hours.",
-                limits.max_per_day.0
-            ),
-        ],
+        assets: assets.iter().map(|a| a.asset.code.to_string()).collect(),
+        limits,
     }
 }
 
-fn rules(config: &Config) -> Vec<Rule> {
-    let limits = &config.policy;
-    vec![
+fn rules(config: &Config, assets: &[AssetPolicy]) -> Vec<Rule> {
+    let mut rules = vec![
         Rule::AllowAssets {
-            assets: vec![warden_rail_sol::sol()],
+            assets: assets.iter().map(|a| a.asset.clone()).collect(),
         },
         Rule::AllowRecipients {
             addresses: recipients(&config.contacts)
@@ -73,24 +68,34 @@ fn rules(config: &Config) -> Vec<Rule> {
                 .map(|r| r.address)
                 .collect(),
         },
-        Rule::MaxPerTx {
-            amount: limits.max_per_tx.0.clone(),
-        },
-        Rule::ApprovalAbove {
-            amount: limits.approval_above.0.clone(),
-        },
-        Rule::MaxPerWindow {
-            amount: limits.max_per_day.0.clone(),
-            window: SignedDuration::from_hours(24),
-        },
-    ]
+    ];
+    // Each limit only applies to its own asset; AllowAssets keeps out the rest.
+    for a in assets {
+        rules.extend([
+            Rule::MaxPerTx {
+                amount: a.max_per_tx.clone(),
+            },
+            Rule::ApprovalAbove {
+                amount: a.approval_above.clone(),
+            },
+            Rule::MaxPerWindow {
+                amount: a.max_per_day.clone(),
+                window: SignedDuration::from_hours(24),
+            },
+        ]);
+    }
+    rules
 }
 
 /// Stores the configured policy as a new version when it differs from the latest.
-pub async fn seed_policy(store: &PgStore, config: &Config) -> anyhow::Result<Policy> {
+pub async fn seed_policy(
+    store: &PgStore,
+    config: &Config,
+    assets: &[AssetPolicy],
+) -> anyhow::Result<Policy> {
     let chat = config.telegram.owner_chat_id;
     let agent = agent_id(chat);
-    let rules = rules(config);
+    let rules = rules(config, assets);
     let current = store.policy(agent).await?;
     if let Some(current) = current.filter(|p| p.rules == rules) {
         return Ok(current);

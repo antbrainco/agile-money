@@ -1,7 +1,8 @@
-//! Solana Pay rail: native SOL transfers keyed by a Solana Pay `reference`.
+//! Solana Pay rail: SOL and SPL token (USDC) transfers keyed by a Solana Pay
+//! `reference`.
 //!
 //! The reference is derived from the intent's idempotency key and added to the
-//! transfer as a read-only account, so `getSignaturesForAddress(reference)`
+//! transfer instruction as a read-only account, so `getSignaturesForAddress(reference)`
 //! finds a payment that already landed and a retry never pays twice (rule 10).
 //! Live network tests go behind the `live` feature.
 
@@ -15,7 +16,7 @@ use sha2::{Digest, Sha256};
 use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::api::client_error::Error as ClientError;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::instruction::AccountMeta;
+use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signature, Signer};
 use solana_sdk::transaction::Transaction;
@@ -23,7 +24,7 @@ use url::Url;
 use warden_domain::ports::{Rail, RailError};
 use warden_domain::{
     Address, Approved, Asset, Intent, Invoice, PaymentRequest, RailId, RailRef, Settlement,
-    SolAddress, SolSignature, Submission,
+    SolAddress, SolSignature, Submission, TokenContract,
 };
 
 pub const RAIL_ID: RailId = RailId::Sol;
@@ -39,6 +40,23 @@ pub fn sol() -> Asset {
             .unwrap_or_else(|_| unreachable!("SOL is a valid code")),
         decimals: 9,
         contract: None,
+    }
+}
+
+/// Circle's USDC on devnet. Test USDC: https://faucet.circle.com
+pub const USDC_DEVNET_MINT: &str = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+/// Circle's USDC on mainnet.
+pub const USDC_MAINNET_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+/// USDC, an SPL token with 6 decimals: 1 USDC = 10^6 base units.
+pub fn usdc(mint: SolAddress) -> Asset {
+    Asset {
+        rail: RailId::Sol,
+        code: "USDC"
+            .parse()
+            .unwrap_or_else(|_| unreachable!("USDC is a valid code")),
+        decimals: 6,
+        contract: Some(TokenContract::SplMint(mint)),
     }
 }
 
@@ -99,6 +117,8 @@ impl Cluster {
 pub struct SolRail {
     rpc: RpcClient,
     payer: Keypair,
+    /// SPL tokens this rail may send, besides SOL. All on the classic Token program.
+    tokens: Vec<Asset>,
 }
 
 impl std::fmt::Debug for SolRail {
@@ -106,6 +126,7 @@ impl std::fmt::Debug for SolRail {
         f.debug_struct("SolRail")
             .field("rpc", &self.rpc.url())
             .field("payer", &self.payer.pubkey())
+            .field("tokens", &self.tokens)
             .finish()
     }
 }
@@ -118,7 +139,80 @@ impl SolRail {
                 CommitmentConfig::confirmed(),
             ),
             payer: parse_keypair(config.keypair.expose_secret())?,
+            tokens: Vec::new(),
         })
+    }
+
+    /// Lets the rail send these SPL tokens. Each needs an `SplMint` contract.
+    pub fn with_tokens(mut self, tokens: Vec<Asset>) -> Result<Self, Error> {
+        if let Some(bad) = tokens.iter().find(|t| mint_of(t).is_none()) {
+            return Err(Error::Config(format!("{} is not an SPL token", bad.code)));
+        }
+        self.tokens = tokens;
+        Ok(self)
+    }
+
+    /// SOL, then the configured tokens.
+    pub fn assets(&self) -> Vec<Asset> {
+        std::iter::once(sol()).chain(self.tokens.clone()).collect()
+    }
+
+    /// Each token's mint must exist on this network, belong to the Token program
+    /// and have the decimals the asset claims. A devnet mint on mainnet fails here.
+    pub async fn check_tokens(&self) -> Result<(), RailError> {
+        for token in &self.tokens {
+            let Some(mint) = mint_of(token) else { continue };
+            let account = self
+                .rpc
+                .get_account_with_commitment(&mint, CommitmentConfig::confirmed())
+                .await
+                .map_err(classify)?
+                .value
+                .ok_or_else(|| {
+                    RailError::Rejected(format!("{} mint {mint} not found here", token.code))
+                })?;
+            if account.owner != spl_token_interface::ID {
+                return Err(RailError::Rejected(format!(
+                    "{} mint {mint} is not a Token program mint",
+                    token.code
+                )));
+            }
+            let supply = self.rpc.get_token_supply(&mint).await.map_err(classify)?;
+            if supply.decimals != token.decimals {
+                return Err(RailError::Rejected(format!(
+                    "{} mint {mint} has {} decimals, expected {}",
+                    token.code, supply.decimals, token.decimals
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// The wallet's balance of `asset` in minor units. No token account yet means 0.
+    pub async fn balance_of(&self, asset: &Asset) -> Result<u128, RailError> {
+        let Some(mint) = mint_of(asset) else {
+            return self.balance().await.map(u128::from);
+        };
+        let account = token_account(&self.payer.pubkey(), &mint);
+        let exists = self
+            .rpc
+            .get_account_with_commitment(&account, CommitmentConfig::confirmed())
+            .await
+            .map_err(classify)?
+            .value
+            .is_some();
+        if !exists {
+            return Ok(0);
+        }
+        let balance = self
+            .rpc
+            .get_token_account_balance(&account)
+            .await
+            .map_err(classify)?;
+        balance
+            .amount
+            .parse()
+            .map_err(|_| transport(format!("token balance {:?}", balance.amount)))
     }
 
     /// The paying wallet's address.
@@ -174,6 +268,62 @@ fn parse_keypair(secret: &str) -> Result<Keypair, Error> {
     }
 }
 
+fn mint_of(asset: &Asset) -> Option<Pubkey> {
+    match &asset.contract {
+        Some(TokenContract::SplMint(mint)) => Some(Pubkey::new_from_array(mint.to_bytes())),
+        _ => None,
+    }
+}
+
+/// The associated token account holding `mint` for `owner`.
+fn token_account(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
+    spl_associated_token_account_interface::address::get_associated_token_address_with_program_id(
+        owner,
+        mint,
+        &spl_token_interface::ID,
+    )
+}
+
+/// The instructions that move `amount` to `to`, with `reference` on the transfer.
+/// For a token, the recipient's token account is created first if missing; the
+/// payer covers its rent, and the create is a no-op when it exists.
+fn transfer_instructions(
+    payer: &Pubkey,
+    to: &Pubkey,
+    asset: &Asset,
+    amount: u64,
+    reference: Pubkey,
+) -> Result<Vec<Instruction>, RailError> {
+    let reference = AccountMeta::new_readonly(reference, false);
+    let Some(mint) = mint_of(asset) else {
+        let mut transfer = solana_system_interface::instruction::transfer(payer, to, amount);
+        transfer.accounts.push(reference);
+        return Ok(vec![transfer]);
+    };
+    let create =
+        spl_associated_token_account_interface::instruction::create_associated_token_account_idempotent(
+            payer,
+            to,
+            &mint,
+            &spl_token_interface::ID,
+        );
+    let mut transfer = spl_token_interface::instruction::transfer_checked(
+        &spl_token_interface::ID,
+        &token_account(payer, &mint),
+        &mint,
+        &token_account(to, &mint),
+        payer,
+        &[],
+        amount,
+        asset.decimals,
+    )
+    .map_err(|e| RailError::Rejected(format!("token transfer: {e}")))?;
+    // Solana Pay puts references on the transfer. The Token program ignores
+    // accounts past the authority unless the authority is a multisig.
+    transfer.accounts.push(reference);
+    Ok(vec![create, transfer])
+}
+
 fn recipient(intent: &Intent<Approved>) -> Result<Pubkey, RailError> {
     match &intent.to.address {
         Address::SolPubkey(key) => Ok(Pubkey::new_from_array(key.to_bytes())),
@@ -206,9 +356,9 @@ impl Rail for SolRail {
         RAIL_ID
     }
 
-    /// Native SOL only for now; SPL tokens carry a mint in `contract`.
+    /// SOL and the tokens given to `with_tokens`.
     fn supports(&self, asset: &Asset) -> bool {
-        *asset == sol()
+        *asset == sol() || self.tokens.contains(asset)
     }
 
     /// A Solana Pay transfer request URL, paid to this wallet.
@@ -217,8 +367,11 @@ impl Rail for SolRail {
             return Err(RailError::Unsupported);
         }
         let reference = reference_for(&format!("invoice:{}", inv.id));
+        let token = mint_of(&inv.total.asset)
+            .map(|mint| format!("&spl-token={mint}"))
+            .unwrap_or_default();
         let url = format!(
-            "solana:{}?amount={}&reference={reference}&label={}&message={}",
+            "solana:{}?amount={}{token}&reference={reference}&label={}&message={}",
             self.payer.pubkey(),
             inv.total.major(),
             encode("Tilly"),
@@ -240,8 +393,8 @@ impl Rail for SolRail {
             return Err(RailError::Unsupported);
         }
         let to = recipient(intent)?;
-        let lamports = u64::try_from(intent.amount.minor)
-            .map_err(|_| RailError::Rejected("amount exceeds u64 lamports".into()))?;
+        let amount = u64::try_from(intent.amount.minor)
+            .map_err(|_| RailError::Rejected("amount exceeds u64".into()))?;
         let reference = reference_for(intent.idempotency_key.as_str());
         let submission = |signature: Signature| Submission {
             intent: intent.id,
@@ -258,11 +411,13 @@ impl Rail for SolRail {
             return Ok(submission(signature));
         }
 
-        let mut transfer =
-            solana_system_interface::instruction::transfer(&self.payer.pubkey(), &to, lamports);
-        transfer
-            .accounts
-            .push(AccountMeta::new_readonly(reference, false));
+        let mut instructions = transfer_instructions(
+            &self.payer.pubkey(),
+            &to,
+            &intent.amount.asset,
+            amount,
+            reference,
+        )?;
         let memo_text = match &intent.memo {
             Some(memo) => format!("tilly {}: {memo}", intent.id),
             None => format!("tilly {}", intent.id),
@@ -273,8 +428,9 @@ impl Rail for SolRail {
             &[],
         );
         let blockhash = self.rpc.get_latest_blockhash().await.map_err(classify)?;
+        instructions.push(memo);
         let tx = Transaction::new_signed_with_payer(
-            &[transfer, memo],
+            &instructions,
             Some(&self.payer.pubkey()),
             &[&self.payer],
             blockhash,
@@ -284,7 +440,7 @@ impl Rail for SolRail {
             .send_and_confirm_transaction(&tx)
             .await
             .map_err(classify)?;
-        tracing::info!(%signature, lamports, "sent");
+        tracing::info!(%signature, amount = %intent.amount, "sent");
         Ok(submission(signature))
     }
 
@@ -373,6 +529,78 @@ mod tests {
         let arr = parse_keypair(&json).unwrap();
         assert_eq!(b58.pubkey(), kp.pubkey());
         assert_eq!(arr.pubkey(), kp.pubkey());
+    }
+
+    fn devnet_usdc() -> Asset {
+        usdc(USDC_DEVNET_MINT.parse().unwrap())
+    }
+
+    #[test]
+    fn sol_transfer_carries_the_reference() {
+        let (payer, to, reference) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let ixs = transfer_instructions(&payer, &to, &sol(), 5, reference).unwrap();
+        assert_eq!(ixs.len(), 1);
+        assert_eq!(ixs[0].program_id, solana_system_interface::program::ID);
+        assert!(
+            ixs[0]
+                .accounts
+                .iter()
+                .any(|a| a.pubkey == reference && !a.is_writable)
+        );
+    }
+
+    #[test]
+    fn token_transfer_creates_the_account_then_moves_tokens() {
+        let (payer, to, reference) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let asset = devnet_usdc();
+        let mint = mint_of(&asset).unwrap();
+        let ixs = transfer_instructions(&payer, &to, &asset, 2_500_000, reference).unwrap();
+        assert_eq!(ixs.len(), 2);
+        assert_eq!(
+            ixs[0].program_id,
+            spl_associated_token_account_interface::program::ID
+        );
+        let transfer = &ixs[1];
+        assert_eq!(transfer.program_id, spl_token_interface::ID);
+        let keys: Vec<Pubkey> = transfer.accounts.iter().map(|a| a.pubkey).collect();
+        // transfer_checked: source, mint, destination, authority, then the reference.
+        assert_eq!(
+            keys,
+            [
+                token_account(&payer, &mint),
+                mint,
+                token_account(&to, &mint),
+                payer,
+                reference
+            ]
+        );
+        assert!(transfer.accounts[3].is_signer);
+        assert!(!transfer.accounts[4].is_writable && !transfer.accounts[4].is_signer);
+    }
+
+    #[test]
+    fn only_spl_tokens_are_accepted_as_tokens() {
+        let config = SolConfig {
+            rpc_url: default_rpc_url(),
+            keypair: SecretString::from(Keypair::new().to_base58_string()),
+        };
+        let rail = SolRail::new(&config).unwrap();
+        assert!(rail.with_tokens(vec![sol()]).is_err());
+        let rail = SolRail::new(&config)
+            .unwrap()
+            .with_tokens(vec![devnet_usdc()])
+            .unwrap();
+        assert!(rail.supports(&devnet_usdc()));
+        assert!(rail.supports(&sol()));
+        assert_eq!(rail.assets().len(), 2);
     }
 
     #[test]

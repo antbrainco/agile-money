@@ -8,7 +8,7 @@ use secrecy::SecretString;
 use serde::Deserialize;
 use warden_agent_core::LlmSettings;
 use warden_agent_core::tools::parse_major;
-use warden_domain::{Amount, SolAddress};
+use warden_domain::{Amount, Asset, SolAddress};
 use warden_executor::ExecConfig;
 use warden_rail_sol::Cluster;
 use warden_store::DbConfig;
@@ -72,6 +72,8 @@ pub struct RailConfig {
 pub struct SolSection {
     #[serde(default)]
     pub mainnet: bool,
+    /// The USDC mint. Defaults to Circle's mint for the configured network.
+    pub usdc_mint: Option<SolAddress>,
     #[serde(flatten)]
     pub conn: warden_rail_sol::SolConfig,
 }
@@ -82,19 +84,30 @@ pub struct Contact {
     pub address: SolAddress,
 }
 
-/// The owner's spending rules, in SOL. Edited by a human, never by the agent (rule 9).
+/// The owner's spending rules, one section per asset. Edited by a human, never
+/// by the agent (rule 9). An asset without a section can't be paid at all, so
+/// nothing is ever spendable without limits.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct PolicyConfig {
-    pub max_per_tx: SolAmount,
-    pub approval_above: SolAmount,
-    pub max_per_day: SolAmount,
+    pub sol: Limits,
+    /// Present means USDC is on.
+    pub usdc: Option<Limits>,
 }
 
-/// A SOL amount written in major units, `"0.05"` or `2`. Floats are refused:
-/// `0.1` in TOML is already a rounded binary number (rule 4).
+/// One asset's limits, in its major unit.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Limits {
+    pub max_per_tx: Major,
+    pub approval_above: Major,
+    pub max_per_day: Major,
+}
+
+/// An amount written in major units, `"0.05"` or `2`. Floats are refused:
+/// `0.1` in TOML is already a rounded binary number (rule 4). Checked against
+/// the asset's decimals when the config loads.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(try_from = "RawAmount")]
-pub struct SolAmount(pub Amount);
+pub struct Major(String);
 
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -103,16 +116,45 @@ enum RawAmount {
     Whole(u64),
 }
 
-impl TryFrom<RawAmount> for SolAmount {
+impl TryFrom<RawAmount> for Major {
     type Error = String;
     fn try_from(raw: RawAmount) -> Result<Self, String> {
-        let sol = warden_rail_sol::sol();
-        let text = match raw {
+        Ok(Self(match raw {
             RawAmount::Text(text) => text,
             RawAmount::Whole(n) => n.to_string(),
-        };
-        let minor = parse_major(&text, sol.decimals).map_err(|e| e.to_string())?;
-        Ok(Self(Amount::new(minor, sol)))
+        }))
+    }
+}
+
+impl Major {
+    fn of(&self, asset: &Asset, field: &str) -> anyhow::Result<Amount> {
+        let minor = parse_major(&self.0, asset.decimals).map_err(|e| {
+            anyhow::anyhow!(
+                "policy.{}.{field}: {e}",
+                asset.code.as_str().to_ascii_lowercase()
+            )
+        })?;
+        Ok(Amount::new(minor, asset.clone()))
+    }
+}
+
+/// An asset Tilly may pay in, with its limits resolved to minor units.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssetPolicy {
+    pub asset: Asset,
+    pub max_per_tx: Amount,
+    pub approval_above: Amount,
+    pub max_per_day: Amount,
+}
+
+impl AssetPolicy {
+    fn new(asset: Asset, limits: &Limits) -> anyhow::Result<Self> {
+        Ok(Self {
+            max_per_tx: limits.max_per_tx.of(&asset, "max_per_tx")?,
+            approval_above: limits.approval_above.of(&asset, "approval_above")?,
+            max_per_day: limits.max_per_day.of(&asset, "max_per_day")?,
+            asset,
+        })
     }
 }
 
@@ -171,7 +213,34 @@ impl Config {
         if config.network == Network::Mainnet && !config.rail.sol.mainnet {
             anyhow::bail!("network = \"mainnet\" also needs rail.sol.mainnet = true");
         }
+        config.assets()?;
         Ok(config)
+    }
+
+    /// SOL, then USDC when `[policy.usdc]` is set.
+    pub fn assets(&self) -> anyhow::Result<Vec<AssetPolicy>> {
+        let mut assets = vec![AssetPolicy::new(warden_rail_sol::sol(), &self.policy.sol)?];
+        if let Some(limits) = &self.policy.usdc {
+            assets.push(AssetPolicy::new(
+                warden_rail_sol::usdc(self.usdc_mint()?),
+                limits,
+            )?);
+        }
+        Ok(assets)
+    }
+
+    fn usdc_mint(&self) -> anyhow::Result<SolAddress> {
+        if let Some(mint) = self.rail.sol.usdc_mint {
+            return Ok(mint);
+        }
+        let default = match self.network {
+            Network::Devnet => warden_rail_sol::USDC_DEVNET_MINT,
+            Network::Mainnet => warden_rail_sol::USDC_MAINNET_MINT,
+            Network::Testnet => anyhow::bail!("USDC on testnet needs rail.sol.usdc_mint"),
+        };
+        default
+            .parse()
+            .map_err(|_| anyhow::anyhow!("built-in USDC mint {default} does not parse"))
     }
 
     /// The RPC must serve the configured network. A local validator passes on
@@ -191,23 +260,58 @@ impl Config {
 mod tests {
     use super::*;
 
-    fn amount(value: &str) -> Option<SolAmount> {
+    fn amount(value: &str, asset: &Asset) -> Option<Amount> {
         #[derive(Deserialize)]
         struct One {
-            a: SolAmount,
+            a: Major,
         }
         Figment::from(Toml::string(&format!("a = {value}")))
             .extract::<One>()
+            .ok()?
+            .a
+            .of(asset, "a")
             .ok()
-            .map(|o| o.a)
     }
 
     #[test]
     fn amounts_parse_exactly_and_refuse_floats() {
-        assert_eq!(amount("\"0.05\"").unwrap().0.minor, 50_000_000);
-        assert_eq!(amount("2").unwrap().0.minor, 2_000_000_000);
-        assert!(amount("0.05").is_none(), "float");
-        assert!(amount("\"0.0000000001\"").is_none(), "below a lamport");
+        let sol = warden_rail_sol::sol();
+        assert_eq!(amount("\"0.05\"", &sol).unwrap().minor, 50_000_000);
+        assert_eq!(amount("2", &sol).unwrap().minor, 2_000_000_000);
+        assert!(amount("0.05", &sol).is_none(), "float");
+        assert!(
+            amount("\"0.0000000001\"", &sol).is_none(),
+            "below a lamport"
+        );
+        let usdc = warden_rail_sol::usdc(SolAddress::from_bytes([1; 32]));
+        assert_eq!(amount("\"12.5\"", &usdc).unwrap().minor, 12_500_000);
+        assert!(
+            amount("\"0.0000001\"", &usdc).is_none(),
+            "below a micro-USDC"
+        );
+    }
+
+    #[test]
+    fn warden_toml_policy_resolves_both_assets() {
+        #[derive(Deserialize)]
+        struct File {
+            policy: PolicyConfig,
+        }
+        let file: File = Figment::from(Toml::file(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../warden.toml"
+        )))
+        .extract()
+        .unwrap();
+        let sol = AssetPolicy::new(warden_rail_sol::sol(), &file.policy.sol).unwrap();
+        assert_eq!(sol.approval_above.to_string(), "0.05 SOL");
+        let usdc = AssetPolicy::new(
+            warden_rail_sol::usdc(warden_rail_sol::USDC_DEVNET_MINT.parse().unwrap()),
+            file.policy.usdc.as_ref().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(usdc.asset.decimals, 6);
+        assert!(usdc.approval_above.minor < usdc.max_per_tx.minor);
     }
 
     #[test]

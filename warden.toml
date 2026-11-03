@@ -78,12 +78,20 @@ cf-aig-gateway-id = "my-gateway"
 rpc_url = "https://api.devnet.solana.com"
 mainnet = false
 
-# The owner's limits, in SOL. Only a human edits these (rule 9); a change is
-# stored as a new policy version on the next start.
-[policy]
+# The owner's limits, one section per asset, in its major unit. Only a human
+# edits these (rule 9); a change is stored as a new policy version on the next
+# start. An asset without a section can't be paid.
+[policy.sol]
 max_per_tx = "1"
 approval_above = "0.05"
 max_per_day = "2"
+
+# USDC (SPL token). The mint defaults to Circle's for `network`; override with
+# rail.sol.usdc_mint. Devnet USDC: https://faucet.circle.com (pick Solana Devnet).
+[policy.usdc]
+max_per_tx = "50"
+approval_above = "10"
+max_per_day = "100"
 
 # Who the agent may pay. Anything else is denied by policy.
 [[contacts]]

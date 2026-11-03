@@ -59,9 +59,13 @@ Apps build one rail per Cargo feature, e.g. `cargo run -p warden-shop --no-defau
 
 4. Start the bot and send it `/start`. It replies with your chat id. Set that id as
    `WARDEN_TELEGRAM__OWNER_CHAT_ID` and restart.
-5. Edit `[[contacts]]` and `[policy]` in `warden.toml`, then chat: "pay Bob 0.01 SOL for lunch".
+5. Edit `[[contacts]]` and the per-asset limits in `[policy.sol]` and `[policy.usdc]` in
+   `warden.toml`, then chat: "pay Bob 0.01 SOL for lunch" or "pay Acme Design 5 USDC".
    Payments above `approval_above` wait for your Approve tap. Each confirmed payment links to the
-   devnet explorer.
+   devnet explorer. For USDC, get devnet USDC for the wallet at https://faucet.circle.com
+   (Solana Devnet). Drop `[policy.usdc]` to turn USDC off; an asset without limits can't be paid.
+   The first USDC payment to a contact also creates their token account, about 0.002 SOL of rent
+   paid by the wallet.
 
 ```bash
 cargo run -p warden-telegram-bot

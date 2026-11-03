@@ -5,10 +5,14 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use teloxide::prelude::*;
-use teloxide::types::{BotCommand, ChatAction, InlineKeyboardButton, InlineKeyboardMarkup, MessageId};
+use teloxide::types::{
+    BotCommand, ChatAction, InlineKeyboardButton, InlineKeyboardMarkup, MessageId,
+};
 use warden_agent_core::{Agent, Message as Turn, RunObserver};
 use warden_domain::ports::ReadModel;
-use warden_domain::{Approval, ApprovalId, Intent, Proposed, RailRef, Recipient, Untrusted, UserId};
+use warden_domain::{
+    Approval, ApprovalId, Intent, Proposed, RailRef, Recipient, Untrusted, UserId,
+};
 use warden_executor::{Notice, Notifier, PauseSwitch};
 use warden_policy::{Approver, Payments, ProposeOutcome, Resolution};
 use warden_rail_sol::{Cluster, SolRail};
@@ -168,6 +172,23 @@ fn command(text: &str) -> &str {
     word.split_once('@').map_or(word, |(cmd, _)| cmd)
 }
 
+async fn balances(app: &App) -> String {
+    let mut lines = vec![format!("Wallet {}", app.rail.address())];
+    for asset in app.rail.assets() {
+        lines.push(match app.rail.balance_of(&asset).await {
+            Ok(minor) => format!("{}", warden_domain::Amount::new(minor, asset)),
+            Err(e) => format!("{}: couldn't read the balance ({e})", asset.code),
+        });
+    }
+    if matches!(app.cluster, Cluster::Devnet | Cluster::Testnet) {
+        lines.push(
+            "\nTest funds: SOL at https://faucet.solana.com, USDC at https://faucet.circle.com"
+                .into(),
+        );
+    }
+    lines.join("\n")
+}
+
 fn contact_list(contacts: &[Recipient]) -> String {
     if contacts.is_empty() {
         return "No saved contacts yet. Add them under [[contacts]] in warden.toml.".to_owned();
@@ -200,19 +221,7 @@ pub async fn on_message(bot: Bot, msg: Message, app: Arc<App>) -> ResponseResult
     let reply = match command(text) {
         "/start" | "/help" => HELP.to_owned(),
         "/contacts" => contact_list(&app.contacts),
-        "/balance" => match app.rail.balance().await {
-            Ok(lamports) => format!(
-                "Wallet {}\nBalance: {} SOL{}",
-                app.rail.address(),
-                warden_domain::Amount::new(u128::from(lamports), warden_rail_sol::sol()).major(),
-                if matches!(app.cluster, Cluster::Devnet | Cluster::Testnet) {
-                    "\nNeed devnet SOL? https://faucet.solana.com"
-                } else {
-                    ""
-                }
-            ),
-            Err(e) => format!("Couldn't read the balance: {e}"),
-        },
+        "/balance" => balances(&app).await,
         "/pause" => {
             app.pause.pause();
             "Paused. Nothing will be sent until /resume.".to_owned()
