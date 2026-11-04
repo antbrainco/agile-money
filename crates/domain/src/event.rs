@@ -68,6 +68,12 @@ pub enum Event {
         received: Amount,
         rail_ref: RailRef,
     },
+    /// The request can no longer be paid, e.g. its PayPal order was voided or
+    /// no longer exists. The watcher stops checking it.
+    InvoiceCancelled {
+        invoice: InvoiceId,
+        reason: String,
+    },
     PolicyChanged {
         policy: PolicyId,
         version: u32,
@@ -90,6 +96,7 @@ impl Event {
             Self::PaymentAbandoned { .. } => "payment_abandoned",
             Self::InvoiceIssued { .. } => "invoice_issued",
             Self::InvoicePaid { .. } => "invoice_paid",
+            Self::InvoiceCancelled { .. } => "invoice_cancelled",
             Self::PolicyChanged { .. } => "policy_changed",
         }
     }

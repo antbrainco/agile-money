@@ -360,6 +360,21 @@ async fn paid_invoices_leave_the_open_list(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!(store.open_invoices(since).await.unwrap(), [invoice(11)]);
+
+    let (gone, _) = invoice(11);
+    store
+        .append(
+            &StreamId::Invoice(gone.id),
+            1,
+            vec![Event::InvoiceCancelled {
+                invoice: gone.id,
+                reason: "order not found".into(),
+            }],
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert!(store.open_invoices(since).await.unwrap().is_empty());
     // Older than the window: no longer watched.
     let later = Timestamp::now() + SignedDuration::from_hours(1);
     assert!(store.open_invoices(later).await.unwrap().is_empty());

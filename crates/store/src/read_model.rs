@@ -103,7 +103,8 @@ impl PgStore {
             r#"SELECT body FROM events e
                WHERE e.type = 'invoice_issued' AND e.at >= $1
                  AND NOT EXISTS (
-                   SELECT 1 FROM events p WHERE p.stream = e.stream AND p.type = 'invoice_paid'
+                   SELECT 1 FROM events p WHERE p.stream = e.stream
+                     AND p.type IN ('invoice_paid', 'invoice_cancelled')
                  )
                ORDER BY e.seq"#,
             jiff_sqlx::Timestamp::from(since) as _,

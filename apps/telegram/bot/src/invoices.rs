@@ -13,7 +13,7 @@ use warden_agent_core::Error as AgentError;
 use warden_agent_core::tools::{Biller, REQUEST_LIFETIME};
 use warden_domain::ports::{EventStore, Rail, StoreError};
 use warden_domain::{Amount, Event, Invoice, PaymentRequest, RailId, RailRef, StreamId};
-use warden_rail_paypal::PaypalRail;
+use warden_rail_paypal::{Collection, PaypalRail};
 use warden_rail_sol::{Cluster, SolRail};
 use warden_store::PgStore;
 
@@ -159,8 +159,12 @@ impl Watcher {
             .await?;
         for (invoice, request) in open {
             let arrived = match self.arrived(&invoice, request.rail_ref).await {
-                Ok(Some(arrived)) => arrived,
-                Ok(None) => continue,
+                Ok(Seen::Arrived(arrived)) => arrived,
+                Ok(Seen::Nothing) => continue,
+                Ok(Seen::Gone(reason)) => {
+                    self.cancel(&invoice, reason).await?;
+                    continue;
+                }
                 Err(e) => {
                     tracing::warn!(invoice = %invoice.id, error = %e, "could not read payments");
                     continue;
@@ -205,20 +209,45 @@ impl Watcher {
         Ok(())
     }
 
-    /// What has reached the request so far; `None` while nothing has.
-    async fn arrived(
-        &self,
-        invoice: &Invoice,
-        rail_ref: RailRef,
-    ) -> anyhow::Result<Option<Arrived>> {
+    /// Takes a request that can never be paid off the watch list, and says so.
+    async fn cancel(&self, invoice: &Invoice, reason: &str) -> anyhow::Result<()> {
+        let cancelled = Event::InvoiceCancelled {
+            invoice: invoice.id,
+            reason: reason.to_owned(),
+        };
+        match self
+            .store
+            .append(&StreamId::Invoice(invoice.id), 1, vec![cancelled], vec![])
+            .await
+        {
+            Ok(_) => {}
+            Err(StoreError::Conflict(_)) => return Ok(()),
+            Err(e) => return Err(e.into()),
+        }
+        tracing::info!(invoice = %invoice.id, %reason, "payment request cancelled");
+        let text = format!(
+            "The request for {} from {}{} can't be paid any more: {reason}. Ask me for a new one if you still need it.",
+            invoice.total,
+            invoice.to.name,
+            what_for(invoice),
+        );
+        let _turn = self.turn.lock().await;
+        if let Err(e) = self.bot.send_message(self.chat, text).await {
+            tracing::warn!(error = %e, "cancel notice not delivered");
+        }
+        Ok(())
+    }
+
+    /// What has reached the request so far.
+    async fn arrived(&self, invoice: &Invoice, rail_ref: RailRef) -> anyhow::Result<Seen> {
         let asset = &invoice.total.asset;
         match rail_ref {
             RailRef::Sol { reference, .. } => {
                 let received = self.rail.received(&reference, asset).await?;
                 let Some(last) = received.last() else {
-                    return Ok(None);
+                    return Ok(Seen::Nothing);
                 };
-                Ok(Some(Arrived {
+                Ok(Seen::Arrived(Arrived {
                     minor: received.iter().map(|r| r.minor).sum(),
                     link: self.cluster.explorer(&last.signature),
                     by: "",
@@ -233,12 +262,14 @@ impl Watcher {
                 request_id,
             } => {
                 let Some(paypal) = &self.paypal else {
-                    return Ok(None);
+                    return Ok(Seen::Nothing);
                 };
-                let Some(collected) = paypal.collect(&order_id, asset).await? else {
-                    return Ok(None);
+                let collected = match paypal.collect(&order_id, asset).await? {
+                    Collection::Collected(collected) => collected,
+                    Collection::Waiting => return Ok(Seen::Nothing),
+                    Collection::Gone(reason) => return Ok(Seen::Gone(reason)),
                 };
-                Ok(Some(Arrived {
+                Ok(Seen::Arrived(Arrived {
                     minor: collected.minor,
                     link: None,
                     by: " by PayPal",
@@ -248,9 +279,16 @@ impl Watcher {
                     },
                 }))
             }
-            _ => Ok(None),
+            _ => Ok(Seen::Nothing),
         }
     }
+}
+
+enum Seen {
+    Nothing,
+    Arrived(Arrived),
+    /// It can never be paid, and why.
+    Gone(&'static str),
 }
 
 struct Arrived {

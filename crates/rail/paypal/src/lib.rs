@@ -71,6 +71,16 @@ pub struct PaypalConfig {
     pub cancel_url: Option<Url>,
 }
 
+/// Where an invoice's order stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Collection {
+    /// Not paid yet, or the capture is still pending.
+    Waiting,
+    Collected(Collected),
+    /// It can never be paid: voided, or unknown to these credentials.
+    Gone(&'static str),
+}
+
 /// What an invoice's order has collected so far.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Collected {
@@ -138,16 +148,23 @@ impl PaypalRail {
     }
 
     /// Captures the invoice's order once the payer has approved it, then sums
-    /// its completed captures in `asset`. `None` until money has been captured.
+    /// its completed captures in `asset`.
     /// Safe to call any number of times: the capture is deduped by its own
     /// `PayPal-Request-Id`.
     pub async fn collect(
         &self,
         order: &PaypalOrderId,
         asset: &Asset,
-    ) -> Result<Option<Collected>, RailError> {
+    ) -> Result<Collection, RailError> {
         let path = format!("/v2/checkout/orders/{order}");
-        let mut current: Order = self.call(Method::GET, &path, None, None).await?;
+        let (status, body) = self.exchange(Method::GET, &path, None, None).await?;
+        if status == StatusCode::NOT_FOUND {
+            return Ok(Collection::Gone("the PayPal order no longer exists"));
+        }
+        let mut current: Order = decode(&path, status, body)?;
+        if current.status == "VOIDED" {
+            return Ok(Collection::Gone("the PayPal order was voided"));
+        }
         if current.status == "APPROVED" {
             let capture = format!("capture:{order}");
             current = match self
@@ -170,7 +187,7 @@ impl PaypalRail {
             tracing::info!(%order, status = %current.status, "order captured");
         }
         if current.status != "COMPLETED" {
-            return Ok(None);
+            return Ok(Collection::Waiting);
         }
         let mut collected: Option<Collected> = None;
         for capture in current
@@ -188,7 +205,7 @@ impl PaypalRail {
                 minor: so_far.saturating_add(minor),
             });
         }
-        Ok(collected)
+        Ok(collected.map_or(Collection::Waiting, Collection::Collected))
     }
 
     fn url(&self, path: &str) -> Result<Url, RailError> {
@@ -240,7 +257,7 @@ impl PaypalRail {
         Ok(granted.access_token)
     }
 
-    /// One API call. A 401 drops the cached token and tries once more.
+    /// One API call, decoded; any non-2xx is an error.
     async fn call<T: DeserializeOwned>(
         &self,
         method: Method,
@@ -248,6 +265,19 @@ impl PaypalRail {
         request_id: Option<&str>,
         body: Option<&Value>,
     ) -> Result<T, RailError> {
+        let (status, body) = self.exchange(method, path, request_id, body).await?;
+        decode(path, status, body)
+    }
+
+    /// One API call's status and body. A 401 drops the cached token and tries
+    /// once more.
+    async fn exchange(
+        &self,
+        method: Method,
+        path: &str,
+        request_id: Option<&str>,
+        body: Option<&Value>,
+    ) -> Result<(StatusCode, Value), RailError> {
         for attempt in 0..2 {
             let token = self.token().await?;
             let mut request = self
@@ -269,12 +299,7 @@ impl PaypalRail {
                 *self.token.lock().await = None;
                 continue;
             }
-            let body = read(response).await?;
-            if !status.is_success() {
-                return Err(classify(status, &body));
-            }
-            return serde_json::from_value(body)
-                .map_err(|e| RailError::Transport(format!("{path}: unexpected reply: {e}")));
+            return Ok((status, read(response).await?));
         }
         Err(RailError::Rejected(
             "PayPal refused a fresh access token".into(),
@@ -556,6 +581,18 @@ fn parse_value(text: &str, decimals: u8) -> Option<u128> {
         .checked_add(frac)
 }
 
+fn decode<T: DeserializeOwned>(
+    path: &str,
+    status: StatusCode,
+    body: Value,
+) -> Result<T, RailError> {
+    if !status.is_success() {
+        return Err(classify(status, &body));
+    }
+    serde_json::from_value(body)
+        .map_err(|e| RailError::Transport(format!("{path}: unexpected reply: {e}")))
+}
+
 async fn read(response: Response) -> Result<Value, RailError> {
     let bytes = response.bytes().await.map_err(transport)?;
     if bytes.is_empty() {
@@ -797,7 +834,7 @@ mod tests {
         let got = rail.collect(&ORDER.parse().unwrap(), &usd()).await.unwrap();
         assert_eq!(
             got,
-            Some(Collected {
+            Collection::Collected(Collected {
                 capture_id: "3C679366HH908993F".into(),
                 minor: 1250,
             })
@@ -822,7 +859,7 @@ mod tests {
             .mount(&server)
             .await;
         let got = rail.collect(&ORDER.parse().unwrap(), &usd()).await.unwrap();
-        assert_eq!(got, None);
+        assert_eq!(got, Collection::Waiting);
     }
 
     #[tokio::test]
@@ -839,7 +876,32 @@ mod tests {
             .mount(&server)
             .await;
         let got = rail.collect(&ORDER.parse().unwrap(), &usd()).await.unwrap();
-        assert_eq!(got, None);
+        assert_eq!(got, Collection::Waiting);
+    }
+
+    #[tokio::test]
+    async fn vanished_and_voided_orders_are_gone() {
+        let server = MockServer::start().await;
+        let rail = rail(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v2/checkout/orders/GONE"))
+            .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+                "name": "RESOURCE_NOT_FOUND",
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/v2/checkout/orders/{ORDER}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(order("VOIDED", json!([]))))
+            .mount(&server)
+            .await;
+        let gone = rail
+            .collect(&"GONE".parse().unwrap(), &usd())
+            .await
+            .unwrap();
+        assert!(matches!(gone, Collection::Gone(_)), "{gone:?}");
+        let voided = rail.collect(&ORDER.parse().unwrap(), &usd()).await.unwrap();
+        assert!(matches!(voided, Collection::Gone(_)), "{voided:?}");
     }
 
     #[tokio::test]
@@ -950,6 +1012,7 @@ mod tests {
 
     #[tokio::test]
     async fn server_errors_retry_and_refusals_do_not() {
+        // A 404 on an order is `Gone`; other refusals stay errors.
         let server = MockServer::start().await;
         let rail = rail(&server).await;
         Mock::given(method("GET"))
@@ -959,9 +1022,9 @@ mod tests {
             .await;
         Mock::given(method("GET"))
             .and(path("/v2/checkout/orders/GONE"))
-            .respond_with(ResponseTemplate::new(404).set_body_json(json!({
-                "name": "RESOURCE_NOT_FOUND",
-                "details": [{ "issue": "INVALID_RESOURCE_ID" }],
+            .respond_with(ResponseTemplate::new(422).set_body_json(json!({
+                "name": "UNPROCESSABLE_ENTITY",
+                "details": [{ "issue": "ORDER_NOT_APPROVED" }],
             })))
             .mount(&server)
             .await;
@@ -977,7 +1040,7 @@ mod tests {
         assert!(!gone.retryable());
         assert_eq!(
             gone.to_string(),
-            "rail rejected the payment: PayPal 404: RESOURCE_NOT_FOUND INVALID_RESOURCE_ID"
+            "rail rejected the payment: PayPal 422: UNPROCESSABLE_ENTITY ORDER_NOT_APPROVED"
         );
     }
 
