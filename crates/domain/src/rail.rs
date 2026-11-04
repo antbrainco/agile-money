@@ -41,6 +41,7 @@ pub enum RailRef {
         signature: Option<SolSignature>,
     },
     Paypal {
+        /// The checkout order for an invoice, or the payout batch for a payment sent.
         order_id: PaypalOrderId,
         /// Sent as `PayPal-Request-Id`, so PayPal dedupes retries too.
         request_id: IdempotencyKey,

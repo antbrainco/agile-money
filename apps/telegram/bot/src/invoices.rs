@@ -1,5 +1,6 @@
-//! Payment requests: the owner gets a Solana Pay QR code to forward to a client,
-//! and a watcher tells them when the money arrives.
+//! Payment requests: the owner gets a QR code and link to forward to a client
+//! (Solana Pay, or PayPal checkout for USD), and a watcher tells them when the
+//! money arrives.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,7 +12,8 @@ use teloxide::types::InputFile;
 use warden_agent_core::Error as AgentError;
 use warden_agent_core::tools::{Biller, REQUEST_LIFETIME};
 use warden_domain::ports::{EventStore, Rail, StoreError};
-use warden_domain::{Amount, Event, Invoice, PaymentRequest, RailRef, StreamId};
+use warden_domain::{Amount, Event, Invoice, PaymentRequest, RailId, RailRef, StreamId};
+use warden_rail_paypal::PaypalRail;
 use warden_rail_sol::{Cluster, SolRail};
 use warden_store::PgStore;
 
@@ -28,6 +30,7 @@ const QUIET: usize = 4;
 #[derive(Debug, Clone)]
 pub struct TelegramBiller {
     pub rail: Arc<SolRail>,
+    pub paypal: Option<Arc<PaypalRail>>,
     pub store: PgStore,
     pub bot: Bot,
     pub chat: ChatId,
@@ -37,7 +40,19 @@ pub struct TelegramBiller {
 impl Biller for TelegramBiller {
     async fn issue(&self, invoice: Invoice) -> Result<PaymentRequest, AgentError> {
         let fail = |e: &dyn std::fmt::Display| AgentError::Billing(e.to_string());
-        let request = self.rail.request(&invoice).await.map_err(|e| fail(&e))?;
+        let rail: &dyn Rail = match invoice.total.asset.rail {
+            RailId::Sol => self.rail.as_ref(),
+            RailId::Paypal => match &self.paypal {
+                Some(paypal) => paypal.as_ref(),
+                None => return Err(AgentError::Billing("PayPal is not set up".into())),
+            },
+            other => {
+                return Err(AgentError::Billing(format!(
+                    "{other:?} can't take requests"
+                )));
+            }
+        };
+        let request = rail.request(&invoice).await.map_err(|e| fail(&e))?;
         let png = qr_png(&request.url).map_err(|e| fail(&e))?;
         self.store
             .append(
@@ -74,9 +89,13 @@ fn what_for(invoice: &Invoice) -> String {
 }
 
 fn caption(invoice: &Invoice, request: &PaymentRequest) -> String {
+    let how = match request.rail_ref {
+        RailRef::Paypal { .. } => "they can pay it by PayPal or card",
+        _ => "any Solana Pay wallet can pay it",
+    };
     format!(
-        "Payment request: {} from {}{}.\n\nForward this QR code or link; any Solana Pay \
-         wallet can pay it. I'll tell you when it arrives.\n\n{}",
+        "Payment request: {} from {}{}.\n\nForward this QR code or link; {how}. I'll tell \
+         you when it arrives.\n\n{}",
         invoice.total,
         invoice.to.name,
         what_for(invoice),
@@ -114,6 +133,7 @@ fn qr_png(url: &str) -> anyhow::Result<Vec<u8>> {
 #[derive(Debug, Clone)]
 pub struct Watcher {
     pub rail: Arc<SolRail>,
+    pub paypal: Option<Arc<PaypalRail>>,
     pub store: PgStore,
     pub bot: Bot,
     pub chat: ChatId,
@@ -138,34 +158,23 @@ impl Watcher {
             .open_invoices(Timestamp::now() - REQUEST_LIFETIME)
             .await?;
         for (invoice, request) in open {
-            let RailRef::Sol { reference, .. } = request.rail_ref else {
-                continue;
-            };
-            let asset = &invoice.total.asset;
-            let received = match self.rail.received(&reference, asset).await {
-                Ok(r) => r,
+            let arrived = match self.arrived(&invoice, request.rail_ref).await {
+                Ok(Some(arrived)) => arrived,
+                Ok(None) => continue,
                 Err(e) => {
                     tracing::warn!(invoice = %invoice.id, error = %e, "could not read payments");
                     continue;
                 }
             };
-            let total: u128 = received.iter().map(|r| r.minor).sum();
-            let Some(last) = received.last() else {
-                continue;
-            };
-            if total < invoice.total.minor {
-                tracing::info!(invoice = %invoice.id, received = total, "partly paid");
+            if arrived.minor < invoice.total.minor {
+                tracing::info!(invoice = %invoice.id, received = arrived.minor, "partly paid");
                 continue;
             }
-            let rail_ref = RailRef::Sol {
-                reference,
-                signature: Some(last.signature),
-            };
-            let received = Amount::new(total, asset.clone());
+            let received = Amount::new(arrived.minor, invoice.total.asset.clone());
             let paid = Event::InvoicePaid {
                 invoice: invoice.id,
                 received: received.clone(),
-                rail_ref,
+                rail_ref: arrived.rail_ref,
             };
             match self
                 .store
@@ -178,15 +187,15 @@ impl Watcher {
                 Err(e) => return Err(e.into()),
             }
             tracing::info!(invoice = %invoice.id, %received, "payment request paid");
-            let link = self
-                .cluster
-                .explorer(&last.signature)
+            let link = arrived
+                .link
                 .map(|url| format!("\n{url}"))
                 .unwrap_or_default();
             let text = format!(
-                "{} paid {received}{}.{link}",
+                "{} paid {received}{}{}.{link}",
                 invoice.to.name,
-                what_for(&invoice)
+                what_for(&invoice),
+                arrived.by
             );
             let _turn = self.turn.lock().await;
             if let Err(e) = self.bot.send_message(self.chat, text).await {
@@ -195,6 +204,62 @@ impl Watcher {
         }
         Ok(())
     }
+
+    /// What has reached the request so far; `None` while nothing has.
+    async fn arrived(
+        &self,
+        invoice: &Invoice,
+        rail_ref: RailRef,
+    ) -> anyhow::Result<Option<Arrived>> {
+        let asset = &invoice.total.asset;
+        match rail_ref {
+            RailRef::Sol { reference, .. } => {
+                let received = self.rail.received(&reference, asset).await?;
+                let Some(last) = received.last() else {
+                    return Ok(None);
+                };
+                Ok(Some(Arrived {
+                    minor: received.iter().map(|r| r.minor).sum(),
+                    link: self.cluster.explorer(&last.signature),
+                    by: "",
+                    rail_ref: RailRef::Sol {
+                        reference,
+                        signature: Some(last.signature),
+                    },
+                }))
+            }
+            RailRef::Paypal {
+                order_id,
+                request_id,
+            } => {
+                let Some(paypal) = &self.paypal else {
+                    return Ok(None);
+                };
+                let Some(collected) = paypal.collect(&order_id, asset).await? else {
+                    return Ok(None);
+                };
+                Ok(Some(Arrived {
+                    minor: collected.minor,
+                    link: None,
+                    by: " by PayPal",
+                    rail_ref: RailRef::Paypal {
+                        order_id,
+                        request_id,
+                    },
+                }))
+            }
+            _ => Ok(None),
+        }
+    }
+}
+
+struct Arrived {
+    minor: u128,
+    rail_ref: RailRef,
+    /// Where the owner can see the payment.
+    link: Option<String>,
+    /// How it was paid, for the notice.
+    by: &'static str,
 }
 
 #[cfg(test)]

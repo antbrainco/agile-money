@@ -18,6 +18,7 @@ use warden_agent_core::{Agent, DynTool};
 use warden_domain::ports::{IdGen, Rail, SystemClock, UuidV7};
 use warden_executor::{Executor, PauseSwitch};
 use warden_policy::Payments;
+use warden_rail_paypal::PaypalRail;
 use warden_rail_sol::SolRail;
 use warden_store::PgStore;
 
@@ -57,6 +58,19 @@ async fn main() -> anyhow::Result<()> {
     let cluster = rail.cluster().await?;
     config.check_cluster(cluster)?;
     rail.check_tokens().await?;
+    let paypal = match &config.rail.paypal {
+        Some(conf) => {
+            let paypal = Arc::new(PaypalRail::new(conf)?);
+            paypal.check().await?;
+            tracing::info!(live = conf.live, "PayPal requests on");
+            Some(paypal)
+        }
+        None => None,
+    };
+    let mut requestable = rail.assets();
+    if paypal.is_some() {
+        requestable.push(warden_rail_paypal::usd());
+    }
     let clock = Arc::new(SystemClock);
     let ids: Arc<dyn IdGen> = Arc::new(UuidV7);
     let store_arc = Arc::new(store.clone());
@@ -83,9 +97,10 @@ async fn main() -> anyhow::Result<()> {
             ids.clone(),
         )),
         Arc::new(RequestPayment::new(
-            rail.assets(),
+            requestable,
             Arc::new(TelegramBiller {
                 rail: rail.clone(),
+                paypal: paypal.clone(),
                 store: store.clone(),
                 bot: bot.clone(),
                 chat: owner,
@@ -139,6 +154,7 @@ async fn main() -> anyhow::Result<()> {
     let watcher = tokio::spawn(
         Watcher {
             rail: rail.clone(),
+            paypal,
             store: store.clone(),
             bot: bot.clone(),
             chat: owner,

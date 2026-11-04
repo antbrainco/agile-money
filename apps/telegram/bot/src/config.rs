@@ -66,6 +66,9 @@ fn step_limit() -> u32 {
 #[derive(Debug, Deserialize)]
 pub struct RailConfig {
     pub sol: SolSection,
+    /// On when `WARDEN_RAIL__PAYPAL__CLIENT_ID` and `__CLIENT_SECRET` are set:
+    /// payment requests in USD by PayPal checkout.
+    pub paypal: Option<warden_rail_paypal::PaypalConfig>,
 }
 
 #[derive(Debug, Deserialize)]

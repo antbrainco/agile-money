@@ -73,6 +73,13 @@ Apps build one rail per Cargo feature, e.g. `cargo run -p warden-shop --no-defau
    can pay it. A watcher checks open requests every 10 seconds for a week, using the request's
    `reference`. When the total arrives it records `invoice_paid` and tells you, with an
    explorer link. No spending policy applies to money coming in.
+7. To take requests in USD by PayPal, create a REST app at https://developer.paypal.com
+   (sandbox) and set `WARDEN_RAIL__PAYPAL__CLIENT_ID` and `WARDEN_RAIL__PAYPAL__CLIENT_SECRET`.
+   Then ask: "request 20 USD from Dana for the logo". Tilly creates a PayPal order and sends
+   you its checkout link and QR code; the client pays by PayPal or card. The watcher captures
+   the order once the client approves it, then tells you it's paid. Every PayPal write
+   carries a `PayPal-Request-Id`, so a retry never charges twice. Pay sandbox orders with a
+   sandbox personal account from the developer dashboard.
 
 ```bash
 cargo run -p warden-telegram-bot

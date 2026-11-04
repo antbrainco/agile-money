@@ -39,8 +39,8 @@ warden-rail-concordium = { workspace = true, optional = true }
 workspace = true
 
 [features]
-# The MLH Solana build. The bot needs at least one rail.
-default = ["sol"]
+# Solana sends and receives; PayPal takes payment requests in USD. The bot needs sol.
+default = ["sol", "paypal"]
 sol = ["dep:warden-rail-sol"]
 paypal = ["dep:warden-rail-paypal"]
 near = ["dep:warden-rail-near"]

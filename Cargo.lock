@@ -6649,8 +6649,19 @@ dependencies = [
 name = "warden-rail-paypal"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "jiff",
+ "reqwest 0.13.5",
+ "secrecy",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
  "warden-domain",
+ "wiremock",
 ]
 
 [[package]]

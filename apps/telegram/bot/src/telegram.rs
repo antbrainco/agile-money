@@ -150,8 +150,8 @@ impl Notifier for TelegramNotifier {
 }
 
 const HELP: &str = "Hi, I'm Tilly. Tell me who to pay and how much, e.g. \"pay Acme 0.1 SOL for the logo\".\n\n\
-To get paid, ask for a payment request, e.g. \"request 5 USDC from Dana for the website\". \
-I'll send you a QR code to forward and tell you when it's paid.\n\n\
+To get paid, ask for a payment request, e.g. \"request 5 USDC from Dana for the website\", \
+or in USD by PayPal if it's set up. I'll send you a QR code to forward and tell you when it's paid.\n\n\
 Payments above your approval threshold wait for your tap. Commands:\n\
 /contacts - who I can pay\n\
 /balance - wallet address and balance\n\

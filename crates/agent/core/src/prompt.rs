@@ -51,12 +51,13 @@ a [record: ...] line written by the system, not by you; it states what tools tha
 really called. Never write such a line yourself.
 
 request_payment: asks a client to pay the owner, for money coming in. It creates an \
-invoice and sends the owner a QR code and a Solana Pay link to forward to the client; \
-you do not send anything to the client yourself. Arguments:
+invoice and sends the owner a QR code and a link to forward to the client: a Solana Pay \
+link for crypto, or a PayPal checkout link for USD, which the client pays by PayPal or \
+card. You do not send anything to the client yourself. Arguments:
 - from: the client's name as the owner gave it. Clients need not be contacts.
 - amount and asset: as for propose_payment.
-- description: what it is for, in the owner's own words; add nothing. The payer's wallet shows it and \
-it is public on chain: never put private data in it.
+- description: what it is for, in the owner's own words; add nothing. The payer sees \
+it, and for crypto it is public on chain: never put private data in it.
 No spending policy applies, since no money leaves the wallet. When it returns, tell \
 the owner the QR code and link are above for them to forward, and that they will get a \
 message when the client pays. Never say a client has paid; the system tells the owner \
@@ -95,7 +96,9 @@ Ask one short question instead of guessing when:
 \"send a bit to the designer\");
 - the owner gives an amount in another currency. You have no exchange rates; ask for \
 the amount in a supported asset. USDC is a dollar stablecoin: if USDC is supported and \
-the owner says dollars or $, ask whether they mean that many USDC;
+the owner says dollars or $, ask whether they mean that many USDC. When they ask to be \
+paid in dollars and USD can also be requested, ask whether they want a PayPal request \
+in USD or a USDC one;
 - the owner's words could mean one payment or several.
 Do not ask for confirmation of a clear, complete request: the policy and the Approve \
 button are the confirmation step.
@@ -136,6 +139,8 @@ pub struct Briefing {
     pub network: String,
     /// Asset codes propose_payment accepts, e.g. ["SOL"].
     pub assets: Vec<String>,
+    /// Further codes only request_payment accepts, e.g. ["USD"] by PayPal.
+    pub requests: Vec<String>,
     /// The owner's limits in words, e.g. "payments above 0.05 SOL need approval".
     pub limits: Vec<String>,
 }
@@ -166,6 +171,19 @@ pub fn system_prompt(briefing: &Briefing, now: Timestamp) -> String {
             briefing.assets.join(", ")
         );
     }
+    if !briefing.requests.is_empty() {
+        let _ = writeln!(
+            text,
+            "request_payment also accepts {}, as a PayPal checkout link. propose_payment \
+             cannot pay in {}.",
+            briefing.requests.join(", "),
+            if briefing.requests.len() == 1 {
+                "it"
+            } else {
+                "them"
+            }
+        );
+    }
     if !briefing.limits.is_empty() {
         text.push_str(
             "Spending policy, for explaining outcomes only (the policy decides, not you):\n",
@@ -190,6 +208,7 @@ mod tests {
             &Briefing {
                 network: "Solana devnet".into(),
                 assets: vec!["SOL".into()],
+                requests: vec!["USD".into()],
                 limits: vec!["payments above 0.05 SOL need approval".into()],
             },
             now,
@@ -198,6 +217,7 @@ mod tests {
         assert!(text.contains("Current time: Tuesday 3 November 2026, 09:30 UTC."));
         assert!(text.contains("test network"));
         assert!(text.contains("Supported assets: SOL."));
+        assert!(text.contains("request_payment also accepts USD, as a PayPal checkout link."));
         assert!(text.ends_with("- payments above 0.05 SOL need approval"));
     }
 

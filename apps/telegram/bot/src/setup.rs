@@ -53,6 +53,12 @@ pub fn briefing(config: &Config, assets: &[AssetPolicy]) -> Briefing {
     Briefing {
         network: network.into(),
         assets: assets.iter().map(|a| a.asset.code.to_string()).collect(),
+        requests: config
+            .rail
+            .paypal
+            .as_ref()
+            .map(|_| vec![warden_rail_paypal::usd().code.to_string()])
+            .unwrap_or_default(),
         limits,
     }
 }

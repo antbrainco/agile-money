@@ -78,6 +78,13 @@ cf-aig-gateway-id = "my-gateway"
 rpc_url = "https://api.devnet.solana.com"
 mainnet = false
 
+# PayPal: payment requests in USD as checkout links, paid by PayPal or card. On when
+# WARDEN_RAIL__PAYPAL__CLIENT_ID and WARDEN_RAIL__PAYPAL__CLIENT_SECRET are set, from a
+# sandbox REST app at developer.paypal.com. Sandbox unless live = true (rule 5).
+# [rail.paypal]
+# live = false
+# return_url = "https://example.com/thanks"  # where the payer lands after paying
+
 # The owner's limits, one section per asset, in its major unit. Only a human
 # edits these (rule 9); a change is stored as a new policy version on the next
 # start. An asset without a section can't be paid.

@@ -175,7 +175,7 @@ pub struct RequestPaymentArgs {
     pub amount: String,
     /// Asset code, e.g. "USDC".
     pub asset: String,
-    /// What it is for, in the owner's words. Public: the payer's wallet shows it.
+    /// What it is for, in the owner's words. The payer sees it; on chain it is public.
     pub description: String,
 }
 
@@ -184,7 +184,7 @@ impl Tool for RequestPayment {
     type Args = RequestPaymentArgs;
 
     const NAME: &'static str = "request_payment";
-    const DESCRIPTION: &'static str = "Ask a client to pay the owner. Creates an invoice with a Solana Pay link and QR code, sends them to the owner to forward, and tells the owner when the payment arrives.";
+    const DESCRIPTION: &'static str = "Ask a client to pay the owner. Creates an invoice with a payment link and QR code (Solana Pay for crypto, PayPal checkout for USD), sends them to the owner to forward, and tells the owner when the payment arrives.";
 
     async fn call(&self, ctx: &ToolCtx, args: Self::Args) -> Result<ToolOutput, Error> {
         let asset = self
