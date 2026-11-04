@@ -5,7 +5,7 @@ use uuid::Uuid;
 use warden_agent_core::Briefing;
 use warden_domain::ports::ReadModel;
 use warden_domain::{Address, AgentId, Policy, PolicyId, Recipient, Rule, UserId};
-use warden_store::PgStore;
+use warden_store::{PgStore, PolicySource};
 
 use crate::config::{AssetPolicy, Config, Contact, Network};
 
@@ -93,7 +93,9 @@ fn rules(config: &Config, assets: &[AssetPolicy]) -> Vec<Rule> {
     rules
 }
 
-/// Stores the configured policy as a new version when it differs from the latest.
+/// Stores the configured policy as a new version when warden.toml changed since
+/// it was last seeded. Otherwise the latest version stands, including one the
+/// owner saved on the dashboard.
 pub async fn seed_policy(
     store: &PgStore,
     config: &Config,
@@ -102,18 +104,22 @@ pub async fn seed_policy(
     let chat = config.telegram.owner_chat_id;
     let agent = agent_id(chat);
     let rules = rules(config, assets);
+    let seeded = store.config_policy(agent).await?;
     let current = store.policy(agent).await?;
-    if let Some(current) = current.filter(|p| p.rules == rules) {
-        return Ok(current);
+    if let (Some(seeded), Some(current)) = (&seeded, &current)
+        && seeded.rules == rules
+    {
+        return Ok(current.clone());
     }
-    let latest = store.policy(agent).await?.map_or(0, |p| p.version);
     let policy = Policy {
         id: policy_id(chat),
-        version: latest + 1,
+        version: current.map_or(0, |p| p.version) + 1,
         agent,
         rules,
     };
-    store.save_policy(&policy, owner_id(chat)).await?;
+    store
+        .save_policy(&policy, owner_id(chat), PolicySource::Config)
+        .await?;
     tracing::info!(version = policy.version, "policy updated from config");
     Ok(policy)
 }

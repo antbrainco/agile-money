@@ -6,6 +6,8 @@ mod outbox;
 mod projection;
 mod read_model;
 
+pub use read_model::{PolicySource, PolicyVersion};
+
 use std::str::FromStr;
 use std::time::Duration;
 

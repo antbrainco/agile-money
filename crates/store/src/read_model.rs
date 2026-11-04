@@ -2,10 +2,10 @@
 
 use async_trait::async_trait;
 use jiff::Timestamp;
-use warden_domain::ports::{ReadModel, StoreError};
+use warden_domain::ports::{EventStore, ReadModel, StoreError};
 use warden_domain::{
-    AgentId, Amount, ApprovalId, Asset, Event, IdempotencyKey, IntentId, Invoice, PaymentRequest,
-    Policy, SpendSnapshot, StreamId,
+    AgentId, Amount, ApprovalId, Asset, Event, EventEnvelope, IdempotencyKey, IntentId, Invoice,
+    PaymentRequest, Policy, SpendSnapshot, StreamId,
 };
 
 use crate::PgStore;
@@ -124,27 +124,140 @@ impl PgStore {
             .collect()
     }
 
-    /// Stores a new policy version. Policies are human-edited (rule 9); the bot
-    /// seeds one from config at startup.
+    /// Stores a new policy version. Policies are human-edited (rule 9): the bot
+    /// seeds one from config at startup, and the dashboard saves the owner's edits.
     pub async fn save_policy(
         &self,
         policy: &Policy,
         by: warden_domain::UserId,
+        source: PolicySource,
     ) -> Result<(), StoreError> {
         let body = serde_json::to_value(policy).map_err(backend)?;
         sqlx::query!(
-            r#"INSERT INTO policies (policy_id, version, agent_id, body, created_by)
-               VALUES ($1, $2, $3, $4, $5)
+            r#"INSERT INTO policies (policy_id, version, agent_id, body, created_by, source)
+               VALUES ($1, $2, $3, $4, $5, $6)
                ON CONFLICT (policy_id, version) DO NOTHING"#,
             policy.id.as_uuid(),
             i32::try_from(policy.version).map_err(backend)?,
             policy.agent.as_uuid(),
             body,
             by.as_uuid(),
+            source.as_str(),
         )
         .execute(self.pool())
         .await
         .map_err(backend)?;
         Ok(())
     }
+
+    /// The latest version seeded from config, to tell whether the file changed.
+    pub async fn config_policy(&self, agent: AgentId) -> Result<Option<Policy>, StoreError> {
+        let body = sqlx::query_scalar!(
+            r#"SELECT body FROM policies WHERE agent_id = $1 AND source = 'config'
+               ORDER BY version DESC LIMIT 1"#,
+            agent.as_uuid(),
+        )
+        .fetch_optional(self.pool())
+        .await
+        .map_err(backend)?;
+        body.map(serde_json::from_value)
+            .transpose()
+            .map_err(backend)
+    }
+
+    /// Every policy version, newest first.
+    pub async fn policy_versions(&self, agent: AgentId) -> Result<Vec<PolicyVersion>, StoreError> {
+        let rows = sqlx::query!(
+            r#"SELECT version, source, created_at AS "created_at: jiff_sqlx::Timestamp"
+               FROM policies WHERE agent_id = $1 ORDER BY version DESC"#,
+            agent.as_uuid(),
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(backend)?;
+        rows.into_iter()
+            .map(|r| {
+                Ok(PolicyVersion {
+                    version: u32::try_from(r.version).map_err(backend)?,
+                    source: r.source.parse().map_err(backend)?,
+                    created_at: r.created_at.to_jiff(),
+                })
+            })
+            .collect()
+    }
+
+    /// The newest `limit` intent streams, newest first.
+    pub async fn recent_intents(
+        &self,
+        agent: AgentId,
+        limit: i64,
+    ) -> Result<Vec<(IntentId, Vec<EventEnvelope>)>, StoreError> {
+        let ids = sqlx::query_scalar!(
+            "SELECT intent_id FROM intents_view WHERE agent_id = $1 ORDER BY created_at DESC LIMIT $2",
+            agent.as_uuid(),
+            limit,
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(backend)?;
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids.into_iter().map(IntentId::new) {
+            out.push((id, self.load(&StreamId::Intent(id)).await?));
+        }
+        Ok(out)
+    }
+
+    /// The newest `limit` invoice streams, newest first.
+    pub async fn recent_invoices(&self, limit: i64) -> Result<Vec<Vec<EventEnvelope>>, StoreError> {
+        let streams = sqlx::query_scalar!(
+            "SELECT stream FROM events WHERE type = 'invoice_issued' ORDER BY seq DESC LIMIT $1",
+            limit,
+        )
+        .fetch_all(self.pool())
+        .await
+        .map_err(backend)?;
+        let mut out = Vec::with_capacity(streams.len());
+        for stream in streams {
+            let stream: StreamId = stream.parse().map_err(backend)?;
+            out.push(self.load(&stream).await?);
+        }
+        Ok(out)
+    }
+}
+
+/// Who wrote a policy version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PolicySource {
+    /// `warden.toml`, at startup.
+    Config,
+    /// The owner, on the dashboard.
+    Dashboard,
+}
+
+impl PolicySource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Config => "config",
+            Self::Dashboard => "dashboard",
+        }
+    }
+}
+
+impl std::str::FromStr for PolicySource {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "config" => Ok(Self::Config),
+            "dashboard" => Ok(Self::Dashboard),
+            other => Err(format!("unknown policy source {other:?}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PolicyVersion {
+    pub version: u32,
+    pub source: PolicySource,
+    pub created_at: Timestamp,
 }

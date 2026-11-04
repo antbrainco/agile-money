@@ -18,6 +18,7 @@ and anything above a threshold waits for a human. Spec: [../docs/warden-spec.md]
 | `crates/x402` | `warden-x402` | HTTP 402 challenges and proofs |
 | `apps/telegram/bot` | `warden-telegram-bot` | Tilly on Telegram |
 | `apps/shop` | `warden-shop` | Instagram/WhatsApp webhooks |
+| `apps/dashboard` | (npm) | Approvals, history and limits; Vite + React on a Cloudflare Worker |
 
 `apps/dashboard`, `contracts/*` and `services/*` build with their own toolchains and
 sit outside the Cargo workspace.
@@ -80,6 +81,12 @@ Apps build one rail per Cargo feature, e.g. `cargo run -p warden-shop --no-defau
    the order once the client approves it, then tells you it's paid. Every PayPal write
    carries a `PayPal-Request-Id`, so a retry never charges twice. Pay sandbox orders with a
    sandbox personal account from the developer dashboard.
+8. For the dashboard, set `DASHBOARD_TOKEN` in `.env` (`openssl rand -hex 32`); the bot then
+   serves its API on `127.0.0.1:8787`. In `apps/dashboard`, copy `.dev.vars.example` to
+   `.dev.vars` with the same token and a password, then `npm install && npm run dev` and open
+   http://localhost:5173. Approve or reject there or in Telegram: the first answer wins and
+   closes the other. Limits edits are saved as new policy versions and survive restarts.
+   Deploying the Worker is in [apps/dashboard/README.md](apps/dashboard/README.md).
 
 ```bash
 cargo run -p warden-telegram-bot

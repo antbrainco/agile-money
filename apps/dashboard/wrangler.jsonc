@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "tilly-dashboard",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-28",
+  "assets": {
+    "not_found_handling": "single-page-application",
+    // The Worker handles sign-in and the API proxy; everything else is the app.
+    "run_worker_first": ["/api/*", "/auth/*"]
+  },
+  "vars": {
+    // The bot's dashboard API, through the tunnel. Local dev overrides it in .dev.vars.
+    "BOT_API_URL": "https://bot.example.com"
+  },
+  // Secrets (wrangler secret put): DASHBOARD_TOKEN, the bot's API token, and
+  // DASHBOARD_PASSWORD, the owner's sign-in.
+  "observability": { "enabled": true }
+}

@@ -1,0 +1,4 @@
+# Copy to .dev.vars for `npm run dev`. Same token as the bot's DASHBOARD_TOKEN.
+BOT_API_URL=http://127.0.0.1:8787
+DASHBOARD_TOKEN=
+DASHBOARD_PASSWORD=

@@ -37,6 +37,7 @@ pub struct App {
     pub contacts: Vec<Recipient>,
     pub turn: ChatTurn,
     pub history: Mutex<Vec<Turn>>,
+    pub cards: Cards,
 }
 
 /// Held while the agent answers the owner. Payment notices wait for it, so a
@@ -58,11 +59,35 @@ impl std::fmt::Debug for App {
     }
 }
 
+/// The open approval cards in the owner's chat, so an answer given on the
+/// dashboard can close the card too (rule 8: the first answer wins). Held in
+/// memory: after a restart an old card's buttons still work but stay up.
+#[derive(Debug, Clone, Default)]
+pub struct Cards(Arc<Mutex<std::collections::HashMap<ApprovalId, MessageId>>>);
+
+impl Cards {
+    fn open(&self, approval: ApprovalId, message: MessageId) {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(approval, message);
+    }
+
+    /// The card's message, once; later calls get `None`.
+    pub fn close(&self, approval: ApprovalId) -> Option<MessageId> {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&approval)
+    }
+}
+
 /// Sends approval requests as a message with Approve and Reject buttons.
 #[derive(Debug, Clone)]
 pub struct TelegramApprover {
     pub bot: Bot,
     pub chat: ChatId,
+    pub cards: Cards,
 }
 
 #[async_trait]
@@ -86,11 +111,13 @@ impl Approver for TelegramApprover {
             "Approve this payment?\n\n{} to {}{memo}\n\nExpires in 15 minutes.",
             intent.amount, intent.to.label
         );
-        self.bot
+        let sent = self
+            .bot
             .send_message(self.chat, text)
             .reply_markup(keyboard)
             .await
             .map_err(|e| warden_policy::Error::Channel(e.to_string()))?;
+        self.cards.open(approval.id, sent.id);
         Ok(())
     }
 }
@@ -420,16 +447,30 @@ pub async fn on_callback(bot: Bot, q: CallbackQuery, app: Arc<App>) -> ResponseR
 async fn resolve(app: &App, data: &str) -> Result<String, String> {
     let (action, id) = data.split_once(':').ok_or("Unknown button.")?;
     let approval = ApprovalId::new(id.parse().map_err(|_| "Unknown button.")?);
+    let grant = match action {
+        "a" => true,
+        "r" => false,
+        _ => return Err("Unknown button.".into()),
+    };
+    let answer = answer(app, approval, grant).await;
+    // This card is edited by the caller.
+    app.cards.close(approval);
+    answer
+}
+
+/// Grants or rejects an approval for the owner, from either channel. `Ok` is
+/// what to show once it's answered; `Err` leaves the approval as it was.
+pub async fn answer(app: &App, approval: ApprovalId, grant: bool) -> Result<String, String> {
     let intent = app
         .store
         .approval_intent(approval)
         .await
         .map_err(|e| e.to_string())?
         .ok_or("That approval no longer exists.")?;
-    let result = match action {
-        "a" => app.payments.grant(intent, approval, app.owner_user).await,
-        "r" => app.payments.reject(intent, approval, app.owner_user).await,
-        _ => return Err("Unknown button.".into()),
+    let result = if grant {
+        app.payments.grant(intent, approval, app.owner_user).await
+    } else {
+        app.payments.reject(intent, approval, app.owner_user).await
     };
     match result {
         Ok(Resolution::Granted) => Ok("Approved. Sending now.".into()),

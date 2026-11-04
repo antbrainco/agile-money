@@ -2,6 +2,7 @@
 //! executor and the approval sweeper run in the same process.
 
 mod config;
+mod dashboard;
 mod invoices;
 mod setup;
 mod telegram;
@@ -24,7 +25,7 @@ use warden_store::PgStore;
 
 use crate::config::Config;
 use crate::invoices::{TelegramBiller, Watcher};
-use crate::telegram::{App, ChatTurn, TelegramApprover, TelegramNotifier};
+use crate::telegram::{App, Cards, ChatTurn, TelegramApprover, TelegramNotifier};
 use crate::webhook::Webhook;
 
 /// How often expired approvals are swept.
@@ -74,6 +75,7 @@ async fn main() -> anyhow::Result<()> {
     let clock = Arc::new(SystemClock);
     let ids: Arc<dyn IdGen> = Arc::new(UuidV7);
     let store_arc = Arc::new(store.clone());
+    let cards = Cards::default();
 
     let payments = Payments::new(
         store_arc.clone(),
@@ -81,6 +83,7 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(TelegramApprover {
             bot: bot.clone(),
             chat: owner,
+            cards: cards.clone(),
         }),
         clock.clone(),
         ids.clone(),
@@ -185,7 +188,11 @@ async fn main() -> anyhow::Result<()> {
         contacts,
         turn,
         history: Mutex::default(),
+        cards,
     });
+    if let Some(conf) = &config.dashboard {
+        dashboard::serve(conf, app.clone(), bot.clone()).await?;
+    }
     if let Err(e) = bot.set_my_commands(telegram::commands()).await {
         tracing::warn!(error = %e, "command menu not set");
     }

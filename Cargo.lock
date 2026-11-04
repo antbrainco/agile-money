@@ -6756,6 +6756,7 @@ dependencies = [
  "qrcode",
  "secrecy",
  "serde",
+ "serde_json",
  "teloxide",
  "tokio",
  "tracing",

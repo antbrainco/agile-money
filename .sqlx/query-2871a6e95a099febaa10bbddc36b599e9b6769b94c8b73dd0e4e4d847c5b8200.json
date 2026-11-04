@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO policies (policy_id, version, agent_id, body, created_by, source)\n               VALUES ($1, $2, $3, $4, $5, $6)\n               ON CONFLICT (policy_id, version) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Uuid",
+        "Jsonb",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2871a6e95a099febaa10bbddc36b599e9b6769b94c8b73dd0e4e4d847c5b8200"
+}
