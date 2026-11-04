@@ -9,8 +9,8 @@ use jiff::{SignedDuration, Timestamp};
 
 use crate::ports::{EventStore, Outbox, OutboxCommand, OutboxJob, ReadModel, StoreError};
 use crate::{
-    AgentId, Amount, ApprovalId, Asset, Event, EventEnvelope, IdempotencyKey, Intent, IntentId,
-    IntentState, Policy, Proposed, SpendSnapshot, StreamId,
+    Address, AgentId, Amount, ApprovalId, Asset, Event, EventEnvelope, IdempotencyKey, Intent,
+    IntentId, IntentState, Policy, Proposed, SpendSnapshot, StreamId,
 };
 
 #[derive(Debug, Default)]
@@ -165,7 +165,28 @@ impl ReadModel for MemStore {
             settled: Amount::new(settled, asset.clone()),
             reserved: Amount::new(reserved, asset.clone()),
             window_start: since,
+            recipient_paid: false,
         })
+    }
+
+    async fn paid_before(&self, agent: AgentId, to: &Address) -> Result<bool, StoreError> {
+        let inner = self.lock();
+        let backend = |e: crate::Error| StoreError::Backend(e.to_string());
+        for (stream, history) in &inner.streams {
+            let Some(id) = stream.as_intent() else {
+                continue;
+            };
+            let events: Vec<&Event> = history.iter().map(|e| &e.event).collect();
+            let intent =
+                Intent::<Proposed>::from_history(id, events.iter().copied()).map_err(backend)?;
+            if intent.agent == agent
+                && &intent.to.address == to
+                && IntentState::replay(events).map_err(backend)? == IntentState::Confirmed
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     async fn intent_by_key(&self, key: &IdempotencyKey) -> Result<Option<IntentId>, StoreError> {

@@ -10,13 +10,13 @@ use teloxide::types::{
 };
 use warden_agent_core::{Agent, Message as Turn, RunObserver};
 use warden_domain::ports::ReadModel;
-use warden_domain::{
-    Approval, ApprovalId, Intent, Proposed, RailRef, Recipient, Untrusted, UserId,
-};
+use warden_domain::{Approval, ApprovalId, Intent, Proposed, RailRef, Untrusted, UserId};
 use warden_executor::{Notice, Notifier, PauseSwitch};
-use warden_policy::{Approver, Payments, ProposeOutcome, Resolution};
+use warden_policy::{Approver, Payments, ProposeOutcome, Resolution, fingerprint};
 use warden_rail_sol::{Cluster, SolRail};
-use warden_store::PgStore;
+use warden_store::{ContactSource, ContactState, PgStore};
+
+use crate::contacts::Desk;
 
 /// Turns of chat history the agent sees.
 const HISTORY: usize = 10;
@@ -34,7 +34,7 @@ pub struct App {
     pub rail: Arc<SolRail>,
     pub pause: PauseSwitch,
     pub cluster: Cluster,
-    pub contacts: Vec<Recipient>,
+    pub contacts: Arc<Desk>,
     pub turn: ChatTurn,
     pub history: Mutex<Vec<Turn>>,
     pub cards: Cards,
@@ -48,6 +48,39 @@ pub struct ChatTurn(Arc<tokio::sync::Mutex<()>>);
 impl ChatTurn {
     pub async fn lock(&self) -> tokio::sync::MutexGuard<'_, ()> {
         self.0.lock().await
+    }
+}
+
+impl App {
+    /// The kill switch, from either channel. Pausing always works, takes effect
+    /// before it is stored (failing closed), and survives a restart. Resuming
+    /// loosens, so it needs the owner's code once codes are set up.
+    pub async fn set_paused(&self, paused: bool, code: Option<&str>) -> Result<String, String> {
+        let agent = crate::setup::agent_id(self.owner.0);
+        if paused {
+            self.pause.pause();
+            self.store.set_paused(agent, true).await.map_err(|e| {
+                format!("Paused, but not saved, so a restart would resume payments: {e}")
+            })?;
+            tracing::info!("payments paused");
+            return Ok("Paused. Nothing will be sent until you resume.".into());
+        }
+        let guard = self.contacts.guard();
+        if guard.enabled() {
+            let code = code.map(str::trim).filter(|c| !c.is_empty()).ok_or(
+                "Resuming needs a code: send /resume and the 6-digit code from your authenticator app.",
+            )?;
+            guard
+                .check(code, jiff::Timestamp::now())
+                .map_err(|e| e.to_string())?;
+        }
+        self.store
+            .set_paused(agent, false)
+            .await
+            .map_err(|e| e.to_string())?;
+        self.pause.resume();
+        tracing::info!("payments resumed");
+        Ok("Resumed.".into())
     }
 }
 
@@ -102,14 +135,17 @@ impl Approver for TelegramApprover {
             InlineKeyboardButton::callback("Approve", format!("a:{id}")),
             InlineKeyboardButton::callback("Reject", format!("r:{id}")),
         ]]);
+        // The memo is the model's words: shown as such, after the facts.
         let memo = intent
             .memo
             .as_deref()
-            .map(|m| format!("\nMemo: {m}"))
+            .map(|m| format!("\nMemo (written by the agent): {m}"))
             .unwrap_or_default();
         let text = format!(
-            "Approve this payment?\n\n{} to {}{memo}\n\nExpires in 15 minutes.",
-            intent.amount, intent.to.label
+            "Approve this payment?\n\n{} to {}\nAddress: {}{memo}\n\nExpires in 15 minutes.",
+            intent.amount,
+            intent.to.label,
+            fingerprint(&intent.to.address)
         );
         let sent = self
             .bot
@@ -179,22 +215,35 @@ impl Notifier for TelegramNotifier {
 const HELP: &str = "Hi, I'm Tilly. Tell me who to pay and how much, e.g. \"pay Acme 0.1 SOL for the logo\".\n\n\
 To get paid, ask for a payment request, e.g. \"request 5 USDC from Dana for the website\", \
 or in USD by PayPal if it's set up. I'll send you a QR code to forward and tell you when it's paid.\n\n\
-Payments above your approval threshold wait for your tap. Commands:\n\
+Payments above your approval threshold, and the first payment to anyone, wait for your tap. Commands:\n\
 /contacts - who I can pay\n\
+/addcontact Name Address - save a payee (needs your authenticator code)\n\
+/confirm 123456 - confirm it with the code\n\
+/removecontact Name - stop paying someone, at once\n\
 /balance - wallet address and balance\n\
 /pause - stop all payments\n\
-/resume - allow payments again\n\
+/resume 123456 - allow payments again\n\
 /help - this message";
 
 /// The menu Telegram shows next to the message box. Mirrors `HELP`.
 pub fn commands() -> Vec<BotCommand> {
     vec![
         BotCommand::new("contacts", "Who I can pay"),
+        BotCommand::new("addcontact", "Save a payee: name and address"),
+        BotCommand::new("confirm", "Confirm with your authenticator code"),
+        BotCommand::new("removecontact", "Stop paying someone"),
         BotCommand::new("balance", "Wallet address and balance"),
         BotCommand::new("pause", "Stop all payments"),
         BotCommand::new("resume", "Allow payments again"),
         BotCommand::new("help", "What I can do"),
     ]
+}
+
+/// What follows a command: `/confirm 123 456` -> `123 456`.
+fn args(text: &str) -> &str {
+    let text = text.trim();
+    text.split_once(char::is_whitespace)
+        .map_or("", |(_, rest)| rest.trim())
 }
 
 /// `/contacts@AgileMoneyBot extra` -> `/contacts`; anything else unchanged.
@@ -224,15 +273,53 @@ async fn balances(app: &App) -> String {
     lines.join("\n")
 }
 
-fn contact_list(contacts: &[Recipient]) -> String {
+async fn contact_list(app: &App) -> String {
+    let contacts = match app.contacts.list().await {
+        Ok(c) => c,
+        Err(e) => return format!("Couldn't read the contacts: {e}"),
+    };
     if contacts.is_empty() {
-        return "No saved contacts yet. Add them under [[contacts]] in warden.toml.".to_owned();
+        return "No saved contacts yet. Add one with /addcontact Name Address.".to_owned();
     }
-    let lines: Vec<String> = contacts
+    let line = |c: &warden_store::Contact| {
+        let when = match (c.state, c.active_at) {
+            (ContactState::Confirmed, Some(t)) => {
+                format!(" (can be paid from {} UTC)", t.strftime("%b %-d %H:%M"))
+            }
+            (ContactState::Proposed, _) => " (waiting for your /confirm code)".to_owned(),
+            _ => String::new(),
+        };
+        format!("{}{when}\n{}", c.label, c.address)
+    };
+    let (active, pending): (Vec<_>, Vec<_>) = contacts
         .iter()
-        .map(|c| format!("{}\n{}", c.label, c.address))
-        .collect();
-    format!("I can pay these contacts:\n\n{}", lines.join("\n\n"))
+        .partition(|c| c.state == ContactState::Active);
+    let mut text = format!(
+        "I can pay these contacts:\n\n{}",
+        active
+            .iter()
+            .map(|c| line(c))
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    );
+    if !pending.is_empty() {
+        text.push_str(&format!(
+            "\n\nNot payable yet:\n\n{}",
+            pending
+                .iter()
+                .map(|c| line(c))
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        ));
+    }
+    text
+}
+
+/// Removes a message that carried a code; codes work once, but needn't linger.
+async fn forget(bot: &Bot, msg: &Message) {
+    if let Err(e) = bot.delete_message(msg.chat.id, msg.id).await {
+        tracing::debug!(error = %e, "code message not deleted");
+    }
 }
 
 pub async fn on_message(bot: Bot, msg: Message, app: Arc<App>) -> ResponseResult<()> {
@@ -253,18 +340,49 @@ pub async fn on_message(bot: Bot, msg: Message, app: Arc<App>) -> ResponseResult
     let Some(text) = msg.text() else {
         return Ok(());
     };
+    let rest = args(text);
     let reply = match command(text) {
         "/start" | "/help" => HELP.to_owned(),
-        "/contacts" => contact_list(&app.contacts),
+        "/contacts" => contact_list(&app).await,
         "/balance" => balances(&app).await,
-        "/pause" => {
-            app.pause.pause();
-            "Paused. Nothing will be sent until /resume.".to_owned()
-        }
+        "/pause" => app.set_paused(true, None).await.unwrap_or_else(|e| e),
         "/resume" => {
-            app.pause.resume();
-            "Resumed.".to_owned()
+            if !rest.is_empty() {
+                forget(&bot, &msg).await;
+            }
+            app.set_paused(false, Some(rest))
+                .await
+                .unwrap_or_else(|e| e)
         }
+        "/addcontact" => match rest.rsplit_once(char::is_whitespace) {
+            Some((label, address)) => {
+                match app
+                    .contacts
+                    .propose(label, address, ContactSource::Telegram)
+                    .await
+                {
+                    // The desk sent the request card.
+                    Ok(_) => return Ok(()),
+                    Err(e) => e,
+                }
+            }
+            None => "Send /addcontact, the name, then the full Solana address.".to_owned(),
+        },
+        "/confirm" => {
+            forget(&bot, &msg).await;
+            match app.contacts.confirm(rest).await {
+                Ok((note, cancel)) => {
+                    app.contacts.notify(note, cancel).await;
+                    return Ok(());
+                }
+                Err(e) => e,
+            }
+        }
+        "/removecontact" => match app.contacts.find_active(rest).await {
+            Ok(Some(contact)) => app.contacts.remove(contact.id).await.unwrap_or_else(|e| e),
+            Ok(None) => format!("{rest:?} isn't a saved contact. /contacts lists them."),
+            Err(e) => e,
+        },
         _ => {
             // Until the reply is final; payment notices queue behind it.
             let _turn = app.turn.0.lock().await;
@@ -446,6 +564,10 @@ pub async fn on_callback(bot: Bot, q: CallbackQuery, app: Arc<App>) -> ResponseR
 
 async fn resolve(app: &App, data: &str) -> Result<String, String> {
     let (action, id) = data.split_once(':').ok_or("Unknown button.")?;
+    if action == "cx" {
+        let contact = uuid::Uuid::parse_str(id).map_err(|_| "Unknown button.")?;
+        return app.contacts.cancel(contact).await;
+    }
     let approval = ApprovalId::new(id.parse().map_err(|_| "Unknown button.")?);
     let grant = match action {
         "a" => true,

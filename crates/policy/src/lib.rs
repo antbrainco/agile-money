@@ -147,6 +147,11 @@ fn check(
             ))
         }
         Rule::QuietHours { from, to, tz } => quiet_hours(now, *from, *to, tz),
+        Rule::ApproveFirstPayment if !spend.recipient_paid => require(format!(
+            "first payment to {} ({})",
+            intent.to.label,
+            fingerprint(&intent.to.address)
+        )),
         _ => Decision::Allow,
     }
 }
@@ -173,6 +178,18 @@ fn in_window(t: Time, from: Time, to: Time) -> bool {
     } else {
         t >= from || t < to
     }
+}
+
+/// The start and end of an address, enough to check it against the real one by eye.
+pub fn fingerprint(address: &warden_domain::Address) -> String {
+    let text = address.to_string();
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= 12 {
+        return text;
+    }
+    let head: String = chars[..4].iter().collect();
+    let tail: String = chars[chars.len() - 4..].iter().collect();
+    format!("{head}…{tail}")
 }
 
 fn deny(reason: impl Into<String>) -> Decision {

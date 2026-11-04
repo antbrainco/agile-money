@@ -1,6 +1,6 @@
 //! Layered config: `warden.toml`, then `WARDEN_*` env vars (`__` nests), then
 //! the conventional `DATABASE_URL`, `TELOXIDE_TOKEN`, `TUNNEL_URL` and
-//! `TELEGRAM_WEBHOOK_SECRET` and `DASHBOARD_TOKEN`.
+//! `TELEGRAM_WEBHOOK_SECRET`, `DASHBOARD_TOKEN` and `TOTP_SECRET`.
 
 use figment::Figment;
 use figment::providers::{Env, Format, Toml};
@@ -30,6 +30,8 @@ pub struct Config {
     pub policy: PolicyConfig,
     /// The dashboard's API, on when `DASHBOARD_TOKEN` is set.
     pub dashboard: Option<crate::dashboard::DashboardConfig>,
+    #[serde(default)]
+    pub security: crate::security::SecurityConfig,
 }
 
 /// The network the owner means to use. Checked against the RPC's genesis hash at startup.
@@ -204,6 +206,11 @@ impl Config {
                 Env::raw()
                     .only(&["DASHBOARD_TOKEN"])
                     .map(|_| "dashboard.token".into()),
+            )
+            .merge(
+                Env::raw()
+                    .only(&["TOTP_SECRET"])
+                    .map(|_| "security.totp_secret".into()),
             )
             .extract()?;
         Self::finish(config)

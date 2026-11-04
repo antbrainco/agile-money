@@ -21,7 +21,7 @@ pub fn owner_id(chat: i64) -> UserId {
     UserId::new(Uuid::from_u64_pair(NAMESPACE | 2, chat as u64))
 }
 
-fn policy_id(chat: i64) -> PolicyId {
+pub fn policy_id(chat: i64) -> PolicyId {
     PolicyId::new(Uuid::from_u64_pair(NAMESPACE | 3, chat as u64))
 }
 
@@ -42,7 +42,10 @@ pub fn briefing(config: &Config, assets: &[AssetPolicy]) -> Briefing {
         Network::Testnet => "Solana testnet",
         Network::Mainnet => "Solana mainnet",
     };
-    let mut limits = vec!["Only saved contacts can be paid; any other address is denied.".into()];
+    let mut limits = vec![
+        "Only saved contacts can be paid; any other address is denied.".into(),
+        "The first payment to any contact needs the owner's approval, whatever the amount.".into(),
+    ];
     for a in assets {
         limits.push(format!(
             "{}: payments above {} need the owner's approval; no single payment may exceed {}; \
@@ -74,6 +77,7 @@ fn rules(config: &Config, assets: &[AssetPolicy]) -> Vec<Rule> {
                 .map(|r| r.address)
                 .collect(),
         },
+        Rule::ApproveFirstPayment,
     ];
     // Each limit only applies to its own asset; AllowAssets keeps out the rest.
     for a in assets {
@@ -93,9 +97,10 @@ fn rules(config: &Config, assets: &[AssetPolicy]) -> Vec<Rule> {
     rules
 }
 
-/// Stores the configured policy as a new version when warden.toml changed since
-/// it was last seeded. Otherwise the latest version stands, including one the
-/// owner saved on the dashboard.
+/// Stores the configured policy as a new version when warden.toml's limits
+/// changed since they were last seeded. Otherwise the latest version stands,
+/// including one the owner saved on the dashboard. The recipient allowlist is
+/// left out of the comparison and carried over: the contacts desk owns it.
 pub async fn seed_policy(
     store: &PgStore,
     config: &Config,
@@ -107,10 +112,24 @@ pub async fn seed_policy(
     let seeded = store.config_policy(agent).await?;
     let current = store.policy(agent).await?;
     if let (Some(seeded), Some(current)) = (&seeded, &current)
-        && seeded.rules == rules
+        && limits_only(&seeded.rules) == limits_only(&rules)
     {
         return Ok(current.clone());
     }
+    let rules = match current.as_ref().and_then(|p| {
+        p.rules
+            .iter()
+            .find(|r| matches!(r, Rule::AllowRecipients { .. }))
+    }) {
+        Some(kept) => rules
+            .into_iter()
+            .map(|r| match r {
+                Rule::AllowRecipients { .. } => kept.clone(),
+                r => r,
+            })
+            .collect(),
+        None => rules,
+    };
     let policy = Policy {
         id: policy_id(chat),
         version: current.map_or(0, |p| p.version) + 1,
@@ -122,4 +141,11 @@ pub async fn seed_policy(
         .await?;
     tracing::info!(version = policy.version, "policy updated from config");
     Ok(policy)
+}
+
+fn limits_only(rules: &[Rule]) -> Vec<&Rule> {
+    rules
+        .iter()
+        .filter(|r| !matches!(r, Rule::AllowRecipients { .. }))
+        .collect()
 }

@@ -38,6 +38,9 @@ pub enum Rule {
         to: Time,
         tz: TimeZoneName,
     },
+    /// The first payment to an address waits for the owner, whatever the
+    /// amount: a newly saved or mistyped contact can't be paid unseen.
+    ApproveFirstPayment,
 }
 
 /// What rules read instead of the database, for the intent's asset.
@@ -47,4 +50,7 @@ pub struct SpendSnapshot {
     /// Approved or submitted, not yet confirmed (rule 3).
     pub reserved: Amount,
     pub window_start: Timestamp,
+    /// A payment to this intent's recipient has been confirmed before.
+    #[serde(default)]
+    pub recipient_paid: bool,
 }

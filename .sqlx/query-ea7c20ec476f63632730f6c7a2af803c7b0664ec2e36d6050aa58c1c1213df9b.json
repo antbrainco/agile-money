@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO switches (agent_id, paused) VALUES ($1, $2)\n               ON CONFLICT (agent_id) DO UPDATE SET paused = $2, changed_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ea7c20ec476f63632730f6c7a2af803c7b0664ec2e36d6050aa58c1c1213df9b"
+}

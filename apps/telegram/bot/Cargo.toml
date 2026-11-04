@@ -18,6 +18,7 @@ qrcode.workspace = true
 secrecy.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 teloxide.workspace = true
+totp-rs.workspace = true
 figment.workspace = true
 serde.workspace = true
 serde_json.workspace = true

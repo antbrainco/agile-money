@@ -12,6 +12,8 @@ export interface Overview {
   paused: boolean;
   policy_version: number;
   awaiting_approval: number;
+  /** Authenticator codes are set up; resuming and raising limits ask for one. */
+  codes: boolean;
 }
 
 export interface IntentRow {
@@ -52,7 +54,26 @@ export interface PolicyView {
   version: number;
   limits: Limits[];
   recipients: number;
-  versions: { version: number; source: "config" | "dashboard"; created_at: string }[];
+  versions: { version: number; source: "config" | "dashboard" | "contacts"; created_at: string }[];
+}
+
+export interface ContactRow {
+  id: string;
+  label: string;
+  address: string;
+  /** Start and end of the address, to check by eye. */
+  check: string;
+  state: "proposed" | "confirmed" | "active";
+  source: "config" | "telegram" | "dashboard" | "agent";
+  replaces: boolean;
+  proposed_at: string;
+  active_at: string | null;
+}
+
+export interface ContactsView {
+  contacts: ContactRow[];
+  codes: boolean;
+  cooling_off: string;
 }
 
 export class ApiError extends Error {
@@ -91,7 +112,12 @@ export const api = {
   intents: () => call<IntentRow[]>("/api/intents"),
   invoices: () => call<InvoiceRow[]>("/api/invoices"),
   policy: () => call<PolicyView>("/api/policy"),
-  savePolicy: (version: number, limits: Limits[]) =>
-    call<PolicyView>("/api/policy", send({ version, limits }, "PUT")),
-  pause: (paused: boolean) => call<Overview>("/api/pause", send({ paused })),
+  savePolicy: (version: number, limits: Limits[], code?: string) =>
+    call<PolicyView>("/api/policy", send({ version, limits, code }, "PUT")),
+  pause: (paused: boolean, code?: string) => call<Overview>("/api/pause", send({ paused, code })),
+  contacts: () => call<ContactsView>("/api/contacts"),
+  addContact: (label: string, address: string, code: string) =>
+    call<ContactsView>("/api/contacts", send({ label, address, code })),
+  changeContact: (id: string, action: "cancel" | "remove") =>
+    call<ContactsView>(`/api/contacts/${id}/${action}`, { method: "POST" }),
 };

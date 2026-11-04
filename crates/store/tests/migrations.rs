@@ -16,11 +16,13 @@ async fn creates_all_tables(pool: PgPool) {
     assert_eq!(
         tables,
         [
+            "contacts",
             "events",
             "idempotency",
             "intents_view",
             "outbox",
-            "policies"
+            "policies",
+            "switches"
         ]
     );
 }

@@ -100,7 +100,13 @@ max_per_tx = "50"
 approval_above = "10"
 max_per_day = "100"
 
-# Who the agent may pay. Anything else is denied by policy.
+[security] # the authenticator secret comes from TOTP_SECRET (--example totp_setup)
+# A new or changed contact waits this long before it can be paid, so a stolen
+# Telegram session can't add a payee and pay it at once. Cancel any time.
+cooling_off = "24h"
+
+# Who the agent may pay; anything else is denied by policy. Seeded as live contacts at startup. Add more from Telegram (/addcontact) or the
+# dashboard; those need a code and wait out the cooling-off.
 [[contacts]]
 label = "Acme Design"
 address = "7Np41oeYqPefeNQEHSv1UDhYrehxin3NStELsSKCT4K2"

@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE contacts SET\n                 state = $3,\n                 confirmed_at = CASE WHEN $3 = 'confirmed' THEN $5 ELSE confirmed_at END,\n                 active_at = COALESCE($4, active_at),\n                 closed_at = CASE WHEN $6 THEN $5 ELSE closed_at END\n               WHERE contact_id = $1 AND state = ANY($2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "028f48d0a037e91005683a88632539ef9fdefc26ba82acf0129c3c8746857a99"
+}

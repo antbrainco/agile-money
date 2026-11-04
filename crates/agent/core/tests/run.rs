@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use jiff::Timestamp;
 use serde_json::json;
 use uuid::Uuid;
-use warden_agent_core::tools::{ListContacts, PaymentStatus, ProposePayment};
+use warden_agent_core::tools::{ContactBook, ListContacts, PaymentStatus, ProposePayment};
 use warden_agent_core::{
     Agent, DynTool, Error, Llm, Message, Reply, RunObserver, ToolCall, ToolSpec,
 };
@@ -107,8 +107,12 @@ fn setup(replies: Vec<Reply>) -> (Agent, Arc<MemStore>, Arc<Scripted>) {
         ids.clone(),
     );
     let tools: Vec<Arc<dyn DynTool>> = vec![
-        Arc::new(ProposePayment::new(vec![acme()], vec![sol()], ids.clone())),
-        Arc::new(ListContacts::new(vec![acme()])),
+        Arc::new(ProposePayment::new(
+            ContactBook::new(vec![acme()]),
+            vec![sol()],
+            ids.clone(),
+        )),
+        Arc::new(ListContacts::new(ContactBook::new(vec![acme()]))),
         Arc::new(PaymentStatus::new(payments.clone())),
     ];
     let llm = Arc::new(Scripted {

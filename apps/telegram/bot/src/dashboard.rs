@@ -24,7 +24,8 @@ use warden_domain::{
     Amount, ApprovalId, Asset, Decision, Event, EventEnvelope, IntentId, IntentState, Policy,
     RailId, RailRef, Rule, StreamId,
 };
-use warden_store::{PolicySource, PolicyVersion};
+use warden_policy::fingerprint;
+use warden_store::{Contact, ContactSource, ContactState, PolicySource, PolicyVersion};
 
 use crate::setup;
 use crate::telegram::{self, App};
@@ -70,6 +71,8 @@ pub async fn serve(config: &DashboardConfig, app: Arc<App>, bot: Bot) -> anyhow:
         .route("/api/invoices", get(invoices))
         .route("/api/policy", get(policy).put(save_policy))
         .route("/api/pause", post(pause))
+        .route("/api/contacts", get(contacts).post(add_contact))
+        .route("/api/contacts/{id}/{action}", post(change_contact))
         .layer(middleware::from_fn_with_state(api.clone(), authorize))
         .with_state(api);
     let listener = tokio::net::TcpListener::bind(config.listen).await?;
@@ -132,6 +135,8 @@ struct Overview {
     paused: bool,
     policy_version: u32,
     awaiting_approval: usize,
+    /// Authenticator codes are set up, so loosening asks for one.
+    codes: bool,
 }
 
 async fn overview(State(api): State<Api>) -> Reply<Overview> {
@@ -145,6 +150,7 @@ async fn overview(State(api): State<Api>) -> Reply<Overview> {
         paused: app.pause.is_paused(),
         policy_version: policy.map_or(0, |p| p.version),
         awaiting_approval: awaiting.len(),
+        codes: app.contacts.guard().enabled(),
     }))
 }
 
@@ -469,10 +475,14 @@ struct PolicyEdit {
     /// The version the edit was made against, so two tabs can't overwrite each other.
     version: u32,
     limits: Vec<Limits>,
+    /// The owner's authenticator code; needed when a limit goes up.
+    #[serde(default)]
+    code: Option<String>,
 }
 
 /// Saves the owner's limits as a new policy version (rule 9). Recipients and
-/// allowed assets stay as they are; those come from warden.toml.
+/// allowed assets stay as they are: contacts change through their own flow,
+/// assets in warden.toml. Raising a limit needs a code; lowering never does.
 async fn save_policy(State(api): State<Api>, Json(edit): Json<PolicyEdit>) -> Reply<PolicyView> {
     let app = &api.app;
     let agent = setup::agent_id(app.owner.0);
@@ -494,6 +504,22 @@ async fn save_policy(State(api): State<Api>, Json(edit): Json<PolicyEdit>) -> Re
     let rules = edited(&current, &edit.limits).map_err(|e| failure(StatusCode::BAD_REQUEST, e))?;
     if rules == current.rules {
         return Ok(Json(policy_view(app).await?));
+    }
+    let guard = app.contacts.guard();
+    if guard.enabled() && loosens(&current.rules, &rules) {
+        let code = edit
+            .code
+            .as_deref()
+            .filter(|c| !c.trim().is_empty())
+            .ok_or_else(|| {
+                failure(
+                    StatusCode::FORBIDDEN,
+                    "Raising a limit needs the code from your authenticator app.",
+                )
+            })?;
+        guard
+            .check(code, Timestamp::now())
+            .map_err(|e| failure(StatusCode::FORBIDDEN, e.to_string()))?;
     }
     let next = Policy {
         version: current.version + 1,
@@ -568,25 +594,168 @@ fn edited(current: &Policy, limits: &[Limits]) -> Result<Vec<Rule>, String> {
     Ok(rules)
 }
 
+/// Whether any per-asset limit in `next` is higher than in `current`. A limit
+/// that appears where there was none counts as higher.
+fn loosens(current: &[Rule], next: &[Rule]) -> bool {
+    fn caps(rules: &[Rule]) -> Vec<(u8, &Amount)> {
+        rules
+            .iter()
+            .filter_map(|r| match r {
+                Rule::MaxPerTx { amount } => Some((0, amount)),
+                Rule::ApprovalAbove { amount } => Some((1, amount)),
+                Rule::MaxPerWindow { amount, .. } => Some((2, amount)),
+                _ => None,
+            })
+            .collect()
+    }
+    let before = caps(current);
+    caps(next).into_iter().any(|(kind, amount)| {
+        !before
+            .iter()
+            .any(|(k, old)| *k == kind && old.asset == amount.asset && amount.minor <= old.minor)
+    })
+}
+
 #[derive(Deserialize)]
 struct PauseRequest {
     paused: bool,
+    /// Needed to resume once codes are set up.
+    #[serde(default)]
+    code: Option<String>,
 }
 
 /// The kill switch, as /pause and /resume in the chat.
 async fn pause(State(api): State<Api>, Json(req): Json<PauseRequest>) -> Reply<Overview> {
-    if req.paused {
-        api.app.pause.pause();
-    } else {
-        api.app.pause.resume();
-    }
+    api.app
+        .set_paused(req.paused, req.code.as_deref())
+        .await
+        .map_err(|e| failure(StatusCode::FORBIDDEN, e))?;
     tracing::info!(paused = req.paused, "pause switched from the dashboard");
     overview(State(api)).await
+}
+
+#[derive(Serialize)]
+struct ContactRow {
+    id: Uuid,
+    label: String,
+    address: String,
+    /// Start and end of the address, to check by eye.
+    check: String,
+    state: ContactState,
+    source: ContactSource,
+    /// Replaces a saved contact's address when it goes live.
+    replaces: bool,
+    proposed_at: Timestamp,
+    /// When a confirmed contact can be paid.
+    active_at: Option<Timestamp>,
+}
+
+impl From<Contact> for ContactRow {
+    fn from(c: Contact) -> Self {
+        Self {
+            id: c.id,
+            check: fingerprint(&c.address),
+            address: c.address.to_string(),
+            label: c.label,
+            state: c.state,
+            source: c.source,
+            replaces: c.replaces.is_some(),
+            proposed_at: c.proposed_at,
+            active_at: c.active_at,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct ContactsView {
+    contacts: Vec<ContactRow>,
+    codes: bool,
+    /// How long a confirmed contact waits, in words.
+    cooling_off: String,
+}
+
+async fn contacts(State(api): State<Api>) -> Reply<ContactsView> {
+    contacts_view(&api.app).await.map(Json)
+}
+
+async fn contacts_view(app: &App) -> Result<ContactsView, Failure> {
+    let desk = &app.contacts;
+    Ok(ContactsView {
+        contacts: desk
+            .list()
+            .await
+            .map_err(internal)?
+            .into_iter()
+            .map(ContactRow::from)
+            .collect(),
+        codes: desk.guard().enabled(),
+        cooling_off: crate::contacts::human(desk.cooling_off()),
+    })
+}
+
+#[derive(Deserialize)]
+struct NewContact {
+    label: String,
+    address: String,
+    code: String,
+}
+
+/// Saves a contact with the owner's code; it goes live after the cooling-off,
+/// and Telegram gets a notice with a Cancel button.
+async fn add_contact(State(api): State<Api>, Json(req): Json<NewContact>) -> Reply<ContactsView> {
+    let app = &api.app;
+    app.contacts
+        .add_with_code(&req.label, &req.address, &req.code)
+        .await
+        .map_err(|e| failure(StatusCode::BAD_REQUEST, e))?;
+    contacts_view(app).await.map(Json)
+}
+
+/// Cancels a contact not live yet, or removes a saved one. Neither needs a code.
+async fn change_contact(
+    State(api): State<Api>,
+    Path((id, action)): Path<(Uuid, String)>,
+) -> Reply<ContactsView> {
+    let app = &api.app;
+    let result = match action.as_str() {
+        "cancel" => app.contacts.cancel(id).await,
+        "remove" => app.contacts.remove(id).await,
+        _ => return Err(failure(StatusCode::NOT_FOUND, "unknown action")),
+    };
+    result.map_err(|e| failure(StatusCode::CONFLICT, e))?;
+    contacts_view(app).await.map(Json)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_raising_a_limit_counts_as_loosening() {
+        let current = policy();
+        let lower = edited(
+            &current,
+            &[Limits {
+                asset: "SOL".into(),
+                max_per_tx: "0.5".into(),
+                approval_above: "0.01".into(),
+                max_per_day: "1".into(),
+            }],
+        )
+        .unwrap();
+        assert!(!loosens(&current.rules, &lower));
+        let higher = edited(
+            &current,
+            &[Limits {
+                asset: "SOL".into(),
+                max_per_tx: "0.5".into(),
+                approval_above: "0.4".into(),
+                max_per_day: "1".into(),
+            }],
+        )
+        .unwrap();
+        assert!(loosens(&current.rules, &higher));
+    }
     use warden_domain::{AgentId, PolicyId};
 
     fn sol() -> Asset {

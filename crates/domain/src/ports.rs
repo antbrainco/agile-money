@@ -10,8 +10,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    AgentId, ApprovalId, Approved, Asset, Event, EventEnvelope, IdempotencyKey, Intent, IntentId,
-    Invoice, PaymentRequest, Policy, RailId, Settlement, SpendSnapshot, StreamId, Submission,
+    Address, AgentId, ApprovalId, Approved, Asset, Event, EventEnvelope, IdempotencyKey, Intent,
+    IntentId, Invoice, PaymentRequest, Policy, RailId, Settlement, SpendSnapshot, StreamId,
+    Submission,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -134,6 +135,9 @@ pub trait ReadModel: Send + Sync {
         asset: &Asset,
         since: Timestamp,
     ) -> Result<SpendSnapshot, StoreError>;
+
+    /// Whether a payment from `agent` to `to` has been confirmed.
+    async fn paid_before(&self, agent: AgentId, to: &Address) -> Result<bool, StoreError>;
 
     /// The intent an idempotency key already belongs to.
     async fn intent_by_key(&self, key: &IdempotencyKey) -> Result<Option<IntentId>, StoreError>;

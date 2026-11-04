@@ -1,11 +1,13 @@
 //! Postgres adapter for the event log, outbox and projections.
 //! `PgStore` implements [`warden_domain::ports::EventStore`] with compile-time checked queries.
 
+mod contacts;
 mod event_store;
 mod outbox;
 mod projection;
 mod read_model;
 
+pub use contacts::{Contact, ContactSource, ContactState};
 pub use read_model::{PolicySource, PolicyVersion};
 
 use std::str::FromStr;

@@ -19,6 +19,7 @@ jiff-sqlx.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+uuid.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

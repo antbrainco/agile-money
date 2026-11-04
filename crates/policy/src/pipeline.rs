@@ -87,9 +87,13 @@ impl Payments {
         let now = self.clock.now();
         let policy = self.read.policy(intent.agent).await?;
         let since = window_start(policy.as_ref(), now)?;
-        let spend = self
+        let mut spend = self
             .read
             .spend(intent.agent, &intent.amount.asset, since)
+            .await?;
+        spend.recipient_paid = self
+            .read
+            .paid_before(intent.agent, &intent.to.address)
             .await?;
 
         let id = intent.id;

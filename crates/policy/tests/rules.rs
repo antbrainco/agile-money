@@ -72,6 +72,7 @@ fn spend(settled: u128, reserved: u128) -> SpendSnapshot {
         settled: Amount::new(settled, usdc()),
         reserved: Amount::new(reserved, usdc()),
         window_start: Timestamp::UNIX_EPOCH,
+        recipient_paid: true,
     }
 }
 
@@ -131,6 +132,26 @@ fn quiet_hours_need_approval() {
     });
     let d = eval(Some(&p), &intent(1, acme()), &spend(0, 0));
     assert!(matches!(d, Decision::RequireApproval { .. }));
+}
+
+#[test]
+fn first_payment_to_an_address_needs_approval_however_small() {
+    let mut p = policy();
+    p.rules.push(Rule::ApproveFirstPayment);
+    let first = SpendSnapshot {
+        recipient_paid: false,
+        ..spend(0, 0)
+    };
+    match eval(Some(&p), &intent(1, acme()), &first) {
+        Decision::RequireApproval { reasons } => {
+            assert!(reasons[0].starts_with("first payment to Acme Ltd"));
+        }
+        other => panic!("expected approval, got {other:?}"),
+    }
+    assert_eq!(
+        eval(Some(&p), &intent(1, acme()), &spend(0, 0)),
+        Decision::Allow
+    );
 }
 
 proptest! {

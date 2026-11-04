@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use jiff::Timestamp;
 use warden_domain::ports::{EventStore, ReadModel, StoreError};
 use warden_domain::{
-    AgentId, Amount, ApprovalId, Asset, Event, EventEnvelope, IdempotencyKey, IntentId, Invoice,
-    PaymentRequest, Policy, SpendSnapshot, StreamId,
+    Address, AgentId, Amount, ApprovalId, Asset, Event, EventEnvelope, IdempotencyKey, IntentId,
+    Invoice, PaymentRequest, Policy, SpendSnapshot, StreamId,
 };
 
 use crate::PgStore;
@@ -54,7 +54,27 @@ impl ReadModel for PgStore {
             settled: Amount::new(row.settled.parse().map_err(backend)?, asset.clone()),
             reserved: Amount::new(row.reserved.parse().map_err(backend)?, asset.clone()),
             window_start: since,
+            recipient_paid: false,
         })
+    }
+
+    async fn paid_before(&self, agent: AgentId, to: &Address) -> Result<bool, StoreError> {
+        let to = serde_json::to_value(to).map_err(backend)?;
+        let paid = sqlx::query_scalar!(
+            r#"SELECT EXISTS (
+                 SELECT 1 FROM intents_view v
+                 JOIN events e ON e.type = 'intent_proposed'
+                   AND e.body->>'intent' = v.intent_id::text
+                 WHERE v.agent_id = $1 AND v.state = 'confirmed'
+                   AND e.body->'proposal'->'to'->'address' = $2
+               ) AS "paid!""#,
+            agent.as_uuid(),
+            to,
+        )
+        .fetch_one(self.pool())
+        .await
+        .map_err(backend)?;
+        Ok(paid)
     }
 
     async fn intent_by_key(&self, key: &IdempotencyKey) -> Result<Option<IntentId>, StoreError> {
@@ -233,6 +253,8 @@ pub enum PolicySource {
     Config,
     /// The owner, on the dashboard.
     Dashboard,
+    /// The recipient allowlist, rewritten when the active contacts change.
+    Contacts,
 }
 
 impl PolicySource {
@@ -240,6 +262,7 @@ impl PolicySource {
         match self {
             Self::Config => "config",
             Self::Dashboard => "dashboard",
+            Self::Contacts => "contacts",
         }
     }
 }
@@ -250,6 +273,7 @@ impl std::str::FromStr for PolicySource {
         match s {
             "config" => Ok(Self::Config),
             "dashboard" => Ok(Self::Dashboard),
+            "contacts" => Ok(Self::Contacts),
             other => Err(format!("unknown policy source {other:?}")),
         }
     }

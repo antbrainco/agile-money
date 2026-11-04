@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import {
   api,
   ApiError,
+  type ContactRow,
   type IntentRow,
   type InvoiceRow,
   type Limits,
@@ -9,12 +10,13 @@ import {
   type PolicyView,
 } from "./api";
 
-type Tab = "approvals" | "payments" | "requests" | "limits";
+type Tab = "approvals" | "payments" | "requests" | "contacts" | "limits";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "approvals", label: "Approvals" },
   { id: "payments", label: "Payments" },
   { id: "requests", label: "Requests" },
+  { id: "contacts", label: "Contacts" },
   { id: "limits", label: "Limits" },
 ];
 
@@ -148,7 +150,8 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
         {tab === "approvals" && <Approvals onAnswered={overview.reload} />}
         {tab === "payments" && <Payments />}
         {tab === "requests" && <Requests />}
-        {tab === "limits" && <LimitsPage />}
+        {tab === "contacts" && <Contacts />}
+        {tab === "limits" && <LimitsPage codes={!!overview.data?.codes} />}
       </main>
     </div>
   );
@@ -162,20 +165,59 @@ function PauseSwitch({
   onChange: (o: Overview) => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const flip = async () => {
-    const pausing = !overview.paused;
-    if (pausing && !confirm("Pause all payments? Nothing is sent until you resume.")) return;
+  const [asking, setAsking] = useState(false);
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const flip = async (pausing: boolean, given?: string) => {
     setBusy(true);
+    setError(null);
     try {
-      onChange(await api.pause(pausing));
+      onChange(await api.pause(pausing, given));
+      setAsking(false);
+      setCode("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
   };
+  const click = () => {
+    if (!overview.paused) {
+      if (confirm("Pause all payments? Nothing is sent until you resume.")) void flip(true);
+    } else if (overview.codes) {
+      setAsking(true);
+    } else {
+      void flip(false);
+    }
+  };
+  if (asking) {
+    // Pausing is free; resuming loosens, so it takes a code.
+    return (
+      <form
+        className="code-inline"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void flip(false, code);
+        }}
+      >
+        <CodeInput value={code} onChange={setCode} />
+        <button className="primary" disabled={busy || code.length < 6}>
+          Resume
+        </button>
+        <button type="button" className="ghost" onClick={() => setAsking(false)}>
+          Cancel
+        </button>
+        {error && <span className="error small">{error}</span>}
+      </form>
+    );
+  }
   return (
-    <button className={overview.paused ? "danger" : "ghost"} onClick={flip} disabled={busy}>
-      {overview.paused ? "Paused · Resume" : "Pause payments"}
-    </button>
+    <>
+      <button className={overview.paused ? "danger" : "ghost"} onClick={click} disabled={busy}>
+        {overview.paused ? "Paused · Resume" : "Pause payments"}
+      </button>
+      {error && <span className="error small">{error}</span>}
+    </>
   );
 }
 
@@ -365,9 +407,10 @@ function Requests() {
   );
 }
 
-function LimitsPage() {
+function LimitsPage({ codes }: { codes: boolean }) {
   const { data, error, setData } = usePoll(api.policy);
   const [draft, setDraft] = useState<Limits[] | null>(null);
+  const [code, setCode] = useState("");
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -388,8 +431,9 @@ function LimitsPage() {
     setSaving(true);
     setSaveError(null);
     try {
-      const next: PolicyView = await api.savePolicy(data.version, draft);
+      const next: PolicyView = await api.savePolicy(data.version, draft, code || undefined);
       setData(next);
+      setCode("");
       setNotice(`Saved as version ${next.version}. It applies to the next payment.`);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
@@ -402,8 +446,8 @@ function LimitsPage() {
     <section>
       <h2>Limits</h2>
       <p className="muted">
-        Only you change these; the agent can't. Each save is a new version. Recipients come from
-        warden.toml ({data?.recipients ?? 0} saved contacts).
+        Only you change these; the agent can't. Each save is a new version. Lowering a limit is
+        always free{codes ? "; raising one needs a code from your authenticator app" : ""}.
       </p>
       <Status error={error} loading={!data} />
       {notice && <p className="banner">{notice}</p>}
@@ -431,6 +475,7 @@ function LimitsPage() {
           </Table>
           {saveError && <p className="error">{saveError}</p>}
           <div className="actions">
+            {codes && changed && <CodeInput value={code} onChange={setCode} optional />}
             <button className="primary" disabled={!changed || saving}>
               {saving ? "Saving…" : `Save as version ${(data?.version ?? 0) + 1}`}
             </button>
@@ -453,13 +498,195 @@ function LimitsPage() {
                   {v.version === data.version && <span className="pill confirmed">current</span>}
                 </td>
                 <td className="muted">{when(v.created_at)}</td>
-                <td>{v.source === "dashboard" ? "Dashboard" : "warden.toml"}</td>
+                <td>{SOURCE_LABEL[v.source]}</td>
               </tr>
             ))}
           </Table>
         </>
       )}
     </section>
+  );
+}
+
+const SOURCE_LABEL = {
+  config: "warden.toml",
+  dashboard: "Dashboard",
+  contacts: "Contacts changed",
+} as const;
+
+const CONTACT_FROM: Record<ContactRow["source"], string> = {
+  config: "warden.toml",
+  telegram: "Telegram",
+  dashboard: "Dashboard",
+  agent: "Suggested by Tilly",
+};
+
+function Contacts() {
+  const { data, error, reload, setData } = usePoll(api.contacts, POLL_MS * 2);
+  const [label, setLabel] = useState("");
+  const [address, setAddress] = useState("");
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const add = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setFormError(null);
+    try {
+      setData(await api.addContact(label.trim(), address.trim(), code));
+      setNotice(
+        `${label.trim()} is saved and can be paid in ${data?.cooling_off ?? "a while"}. ` +
+          "Telegram has a Cancel button until then.",
+      );
+      setLabel("");
+      setAddress("");
+      setCode("");
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const change = async (row: ContactRow, action: "cancel" | "remove") => {
+    const question =
+      action === "remove"
+        ? `Remove ${row.label}? Tilly won't be able to pay them until you add them again.`
+        : `Cancel ${row.label}?`;
+    if (!confirm(question)) return;
+    try {
+      setData(await api.changeContact(row.id, action));
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : String(err));
+      void reload();
+    }
+  };
+
+  return (
+    <section>
+      <h2>Contacts</h2>
+      <p className="muted">
+        The only people Tilly can pay. A new or changed address waits{" "}
+        {data?.cooling_off ?? "a while"} before it can be paid, and the first payment to anyone
+        always asks you. Removing is instant and needs no code.
+      </p>
+      {notice && <p className="banner">{notice}</p>}
+      <Status error={error} loading={!data} empty={data?.contacts.length === 0} emptyText="No contacts yet." />
+      {data && data.contacts.length > 0 && (
+        <Table head={["Name", "Address", "Status", ""]}>
+          {data.contacts.map((row) => (
+            <tr key={row.id}>
+              <td>
+                <strong>{row.label}</strong>
+                <div className="muted small">{CONTACT_FROM[row.source]}</div>
+              </td>
+              <td className="mono" title={row.address}>
+                {row.check}
+              </td>
+              <td>
+                <ContactState row={row} />
+              </td>
+              <td>
+                <button
+                  className="ghost small"
+                  onClick={() => change(row, row.state === "active" ? "remove" : "cancel")}
+                >
+                  {row.state === "active" ? "Remove" : "Cancel"}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </Table>
+      )}
+      <h3>Add or change a contact</h3>
+      {data && !data.codes ? (
+        <p className="muted">
+          Set up authenticator codes on the server first (<code>--example totp_setup</code>), then
+          restart Tilly. Until then contacts come from warden.toml only.
+        </p>
+      ) : (
+        <form className="card contact-form" onSubmit={add}>
+          <label>
+            Name
+            <input value={label} maxLength={40} onChange={(e) => setLabel(e.target.value)} />
+          </label>
+          <label>
+            Address
+            <input
+              className="mono"
+              value={address}
+              spellCheck={false}
+              autoComplete="off"
+              onChange={(e) => setAddress(e.target.value)}
+            />
+          </label>
+          {address.trim().length > 14 && (
+            <p className="muted small">
+              Check it starts and ends as you expect:{" "}
+              <strong className="mono">{short(address.trim())}</strong>
+            </p>
+          )}
+          <p className="muted small">
+            Using a saved name replaces that contact's address once the wait is over.
+          </p>
+          <div className="actions">
+            <CodeInput value={code} onChange={setCode} />
+            <button className="primary" disabled={busy || !label.trim() || !address.trim() || code.length < 6}>
+              {busy ? "Saving…" : "Save contact"}
+            </button>
+          </div>
+          {formError && <p className="error">{formError}</p>}
+        </form>
+      )}
+    </section>
+  );
+}
+
+function ContactState({ row }: { row: ContactRow }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (row.state !== "confirmed") return;
+    const id = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, [row.state]);
+  if (row.state === "active") return <span className="pill confirmed">Can be paid</span>;
+  if (row.state === "proposed") return <span className="pill open">Needs your code</span>;
+  const left = row.active_at ? Math.max(0, new Date(row.active_at).getTime() - now) : 0;
+  const hours = Math.floor(left / 3600000);
+  const minutes = Math.ceil((left % 3600000) / 60000);
+  return (
+    <>
+      <span className="pill open">{row.replaces ? "Address changing" : "Waiting"}</span>
+      <div className="muted small">
+        {left === 0 ? "Any moment now" : `Live in ${hours ? `${hours} h ` : ""}${minutes} min`}
+      </div>
+    </>
+  );
+}
+
+/** Six digits from the owner's authenticator app. */
+function CodeInput({
+  value,
+  onChange,
+  optional,
+}: {
+  value: string;
+  onChange: (code: string) => void;
+  optional?: boolean;
+}) {
+  return (
+    <input
+      className="code mono"
+      inputMode="numeric"
+      autoComplete="one-time-code"
+      maxLength={6}
+      placeholder={optional ? "Code if raising" : "6-digit code"}
+      aria-label="Authenticator code"
+      value={value}
+      onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 6))}
+    />
   );
 }
 

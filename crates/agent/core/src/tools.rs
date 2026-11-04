@@ -36,9 +36,28 @@ pub fn parse_major(text: &str, decimals: u8) -> Result<u128, Error> {
     minor.to_u128().ok_or_else(|| invalid("too large"))
 }
 
+/// The saved payees, shared with whatever changes them; each read is a copy of
+/// the moment. Only active contacts are in it, the same set the policy allows.
+#[derive(Debug, Clone, Default)]
+pub struct ContactBook(Arc<std::sync::RwLock<Vec<Recipient>>>);
+
+impl ContactBook {
+    pub fn new(contacts: Vec<Recipient>) -> Self {
+        Self(Arc::new(std::sync::RwLock::new(contacts)))
+    }
+
+    pub fn list(&self) -> Vec<Recipient> {
+        self.0.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    pub fn replace(&self, contacts: Vec<Recipient>) {
+        *self.0.write().unwrap_or_else(|e| e.into_inner()) = contacts;
+    }
+}
+
 /// Proposes a payment to a known contact or an exact address.
 pub struct ProposePayment {
-    contacts: Vec<Recipient>,
+    contacts: ContactBook,
     assets: Vec<Asset>,
     ids: Arc<dyn IdGen>,
 }
@@ -53,7 +72,7 @@ impl std::fmt::Debug for ProposePayment {
 }
 
 impl ProposePayment {
-    pub fn new(contacts: Vec<Recipient>, assets: Vec<Asset>, ids: Arc<dyn IdGen>) -> Self {
+    pub fn new(contacts: ContactBook, assets: Vec<Asset>, ids: Arc<dyn IdGen>) -> Self {
         Self {
             contacts,
             assets,
@@ -65,10 +84,11 @@ impl ProposePayment {
         let to = to.trim();
         if let Some(contact) = self
             .contacts
-            .iter()
+            .list()
+            .into_iter()
             .find(|c| c.label.eq_ignore_ascii_case(to))
         {
-            return Ok(contact.clone());
+            return Ok(contact);
         }
         // An exact address; policy decides whether it may be paid.
         let address: SolAddress = to.parse().map_err(|_| {
@@ -228,11 +248,11 @@ impl Tool for RequestPayment {
 /// Lists the owner's saved payees.
 #[derive(Debug)]
 pub struct ListContacts {
-    contacts: Vec<Recipient>,
+    contacts: ContactBook,
 }
 
 impl ListContacts {
-    pub fn new(contacts: Vec<Recipient>) -> Self {
+    pub fn new(contacts: ContactBook) -> Self {
         Self { contacts }
     }
 }
@@ -248,7 +268,59 @@ impl Tool for ListContacts {
     const DESCRIPTION: &'static str = "List the owner's saved payees with their addresses.";
 
     async fn call(&self, _: &ToolCtx, _: Self::Args) -> Result<ToolOutput, Error> {
-        Ok(ToolOutput::Data(json!(self.contacts)))
+        Ok(ToolOutput::Data(json!(self.contacts.list())))
+    }
+}
+
+/// Takes a request to save a payee to the owner. Whoever implements it must not
+/// make the contact payable: the owner confirms it with a second factor, and it
+/// goes live only after a waiting period.
+#[async_trait]
+pub trait ContactDesk: Send + Sync {
+    /// Records the request and asks the owner to confirm it. `Ok` is what to
+    /// tell the model; `Err` is why the request was refused.
+    async fn propose(&self, label: &str, address: &str) -> Result<String, String>;
+}
+
+/// Asks the owner to save a new payee, or a new address for a saved one.
+pub struct ProposeContact {
+    desk: Arc<dyn ContactDesk>,
+}
+
+impl std::fmt::Debug for ProposeContact {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProposeContact").finish_non_exhaustive()
+    }
+}
+
+impl ProposeContact {
+    pub fn new(desk: Arc<dyn ContactDesk>) -> Self {
+        Self { desk }
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ProposeContactArgs {
+    /// The payee's name, as the owner gave it.
+    pub label: String,
+    /// The full Solana address, exactly as the owner typed it.
+    pub address: String,
+}
+
+#[async_trait]
+impl Tool for ProposeContact {
+    type Args = ProposeContactArgs;
+
+    const NAME: &'static str = "propose_contact";
+    const DESCRIPTION: &'static str = "Ask the owner to save a payee, or a new address for a saved one. You cannot save contacts: the owner confirms with a code from their authenticator app, and the contact can only be paid after a waiting period.";
+
+    async fn call(&self, _: &ToolCtx, args: Self::Args) -> Result<ToolOutput, Error> {
+        Ok(ToolOutput::Data(
+            match self.desk.propose(&args.label, &args.address).await {
+                Ok(note) => json!({ "status": "waiting_for_owner", "note": note }),
+                Err(reason) => json!({ "status": "refused", "reason": reason }),
+            },
+        ))
     }
 }
 

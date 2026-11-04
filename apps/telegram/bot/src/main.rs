@@ -2,8 +2,10 @@
 //! executor and the approval sweeper run in the same process.
 
 mod config;
+mod contacts;
 mod dashboard;
 mod invoices;
+mod security;
 mod setup;
 mod telegram;
 mod webhook;
@@ -14,7 +16,9 @@ use std::time::Duration;
 use secrecy::ExposeSecret;
 use teloxide::prelude::*;
 use tracing_subscriber::EnvFilter;
-use warden_agent_core::tools::{ListContacts, PaymentStatus, ProposePayment, RequestPayment};
+use warden_agent_core::tools::{
+    ContactBook, ListContacts, PaymentStatus, ProposeContact, ProposePayment, RequestPayment,
+};
 use warden_agent_core::{Agent, DynTool};
 use warden_domain::ports::{IdGen, Rail, SystemClock, UuidV7};
 use warden_executor::{Executor, PauseSwitch};
@@ -24,7 +28,9 @@ use warden_rail_sol::SolRail;
 use warden_store::PgStore;
 
 use crate::config::Config;
+use crate::contacts::Desk;
 use crate::invoices::{TelegramBiller, Watcher};
+use crate::security::Guard;
 use crate::telegram::{App, Cards, ChatTurn, TelegramApprover, TelegramNotifier};
 use crate::webhook::Webhook;
 
@@ -92,10 +98,27 @@ async fn main() -> anyhow::Result<()> {
     let llm = config.agent.llm.client()?;
     let (model, endpoint) = (llm.model().to_owned(), llm.endpoint().clone());
     let llm = Arc::new(llm);
-    let contacts = setup::recipients(&config.contacts);
+    let book = ContactBook::default();
+    let guard = Arc::new(Guard::new(config.security.totp_secret.as_ref())?);
+    if !guard.enabled() {
+        tracing::warn!(
+            "TOTP_SECRET is not set: contacts can only come from warden.toml, and /resume needs no code"
+        );
+    }
+    let desk = Arc::new(Desk::new(
+        store.clone(),
+        setup::agent_id(owner.0),
+        setup::owner_id(owner.0),
+        book.clone(),
+        guard,
+        config.security.cooling_off,
+        bot.clone(),
+        owner,
+    ));
+    desk.seed(&config.contacts).await?;
     let tools: Vec<Arc<dyn DynTool>> = vec![
         Arc::new(ProposePayment::new(
-            contacts.clone(),
+            book.clone(),
             rail.assets(),
             ids.clone(),
         )),
@@ -110,10 +133,16 @@ async fn main() -> anyhow::Result<()> {
             }),
             ids.clone(),
         )),
-        Arc::new(ListContacts::new(contacts.clone())),
+        Arc::new(ListContacts::new(book.clone())),
+        Arc::new(ProposeContact::new(desk.clone())),
         Arc::new(PaymentStatus::new(payments.clone())),
     ];
     let pause = PauseSwitch::default();
+    // Fails closed: a pause from before a restart still holds.
+    if store.paused(setup::agent_id(owner.0)).await? {
+        pause.pause();
+        tracing::warn!("payments are paused, as they were before the restart");
+    }
     let agent = Agent::new(
         llm,
         tools,
@@ -145,12 +174,13 @@ async fn main() -> anyhow::Result<()> {
     );
     let worker = tokio::spawn(executor.run());
 
-    let (sweeper_payments, sweeper_bot, sweeper_cards) =
-        (payments.clone(), bot.clone(), cards.clone());
+    let (sweeper_payments, sweeper_bot, sweeper_cards, sweeper_desk) =
+        (payments.clone(), bot.clone(), cards.clone(), desk.clone());
     let sweeper = tokio::spawn(async move {
         let mut every = tokio::time::interval(SWEEP_EVERY);
         loop {
             every.tick().await;
+            sweeper_desk.tick().await;
             let expired = match sweeper_payments.expire_stale().await {
                 Ok(expired) => expired,
                 Err(e) => {
@@ -202,7 +232,7 @@ async fn main() -> anyhow::Result<()> {
         rail,
         pause,
         cluster,
-        contacts,
+        contacts: desk,
         turn,
         history: Mutex::default(),
         cards,

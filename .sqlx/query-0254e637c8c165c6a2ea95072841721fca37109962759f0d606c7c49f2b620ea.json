@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n                 SELECT 1 FROM intents_view v\n                 JOIN events e ON e.type = 'intent_proposed'\n                   AND e.body->>'intent' = v.intent_id::text\n                 WHERE v.agent_id = $1 AND v.state = 'confirmed'\n                   AND e.body->'proposal'->'to'->'address' = $2\n               ) AS \"paid!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "paid!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "0254e637c8c165c6a2ea95072841721fca37109962759f0d606c7c49f2b620ea"
+}
