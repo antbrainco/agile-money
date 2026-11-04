@@ -222,10 +222,10 @@ impl Payments {
         Ok(Resolution::Rejected)
     }
 
-    /// Rejects approvals past their expiry (rule 8). Returns how many expired.
-    pub async fn expire_stale(&self) -> Result<usize, Error> {
+    /// Rejects approvals past their expiry (rule 8). Returns the ones that expired.
+    pub async fn expire_stale(&self) -> Result<Vec<ApprovalId>, Error> {
         let now = self.clock.now();
-        let mut expired = 0;
+        let mut expired = vec![];
         for id in self.read.awaiting_approval().await? {
             let history = self.store.load(&StreamId::Intent(id)).await?;
             let Some((approval, expires_at)) = requested(&history) else {
@@ -244,7 +244,7 @@ impl Payments {
                 )
                 .await
             {
-                Ok(_) => expired += 1,
+                Ok(_) => expired.push(approval),
                 // Someone answered it meanwhile.
                 Err(StoreError::Conflict(_)) => {}
                 Err(e) => return Err(e.into()),

@@ -125,7 +125,7 @@ fn check(
             deny(format!("asset {} is not allowed", amount.asset.code))
         }
         Rule::AllowRecipients { addresses } if !addresses.contains(&intent.to.address) => {
-            deny(format!("recipient {} is not allowlisted", intent.to.label))
+            deny(format!("{} is not a saved contact", intent.to.label))
         }
         Rule::MaxPerTx { amount: cap } if cap.asset == amount.asset && amount.minor > cap.minor => {
             deny(format!("{amount} exceeds the {cap} per-payment cap"))

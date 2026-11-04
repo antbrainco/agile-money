@@ -113,6 +113,7 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(ListContacts::new(contacts.clone())),
         Arc::new(PaymentStatus::new(payments.clone())),
     ];
+    let pause = PauseSwitch::default();
     let agent = Agent::new(
         llm,
         tools,
@@ -122,9 +123,12 @@ async fn main() -> anyhow::Result<()> {
         ids,
     )
     .with_step_limit(config.agent.step_limit)
-    .with_briefing(setup::briefing(&config, &assets));
+    .with_briefing(setup::briefing(&config, &assets))
+    .with_pause({
+        let pause = pause.clone();
+        Arc::new(move || pause.is_paused())
+    });
 
-    let pause = PauseSwitch::default();
     let turn = ChatTurn::default();
     let executor = Executor::new(
         store_arc.clone(),
@@ -141,15 +145,28 @@ async fn main() -> anyhow::Result<()> {
     );
     let worker = tokio::spawn(executor.run());
 
-    let sweeper_payments = payments.clone();
+    let (sweeper_payments, sweeper_bot, sweeper_cards) =
+        (payments.clone(), bot.clone(), cards.clone());
     let sweeper = tokio::spawn(async move {
         let mut every = tokio::time::interval(SWEEP_EVERY);
         loop {
             every.tick().await;
-            match sweeper_payments.expire_stale().await {
-                Ok(0) => {}
-                Ok(n) => tracing::info!(expired = n, "approvals expired"),
-                Err(e) => tracing::warn!(error = %e, "approval sweep failed"),
+            let expired = match sweeper_payments.expire_stale().await {
+                Ok(expired) => expired,
+                Err(e) => {
+                    tracing::warn!(error = %e, "approval sweep failed");
+                    continue;
+                }
+            };
+            if !expired.is_empty() {
+                tracing::info!(expired = expired.len(), "approvals expired");
+            }
+            // Take the buttons off, so an expired card can't look answerable.
+            for card in expired.into_iter().filter_map(|a| sweeper_cards.close(a)) {
+                let text = "This approval expired. Nothing was sent.";
+                if let Err(e) = sweeper_bot.edit_message_text(owner, card, text).await {
+                    tracing::warn!(error = %e, "expired approval card not closed");
+                }
             }
         }
     });

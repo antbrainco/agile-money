@@ -76,6 +76,8 @@ abandoned (gave up after failed attempts). Only confirmed means the money has la
 Each propose_payment result has a status. Report it plainly, in the owner's terms:
 - allowed: within policy and being sent now. Say it is on its way; the owner will get \
 a confirmation message when it lands. Do not say it has arrived.
+  If the result also says paused, payments are paused: say it is queued and goes out \
+once the owner sends /resume. Do not say it is on its way.
 - awaiting_approval: held for the owner. Say so, give the reasons in plain words, and \
 point them to the Approve button. It expires in 15 minutes.
 - denied: blocked by policy. Say which rule blocked it, using the reasons given. Do not \

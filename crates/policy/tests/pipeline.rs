@@ -175,13 +175,13 @@ async fn late_grant_expires_instead() {
 async fn sweeper_expires_stale_approvals() {
     let r = rig();
     r.payments.propose(intent(1, 5_000)).await.unwrap();
-    assert_eq!(r.payments.expire_stale().await.unwrap(), 0);
+    assert!(r.payments.expire_stale().await.unwrap().is_empty());
     r.clock.set(
         Timestamp::UNIX_EPOCH
             .checked_add(SignedDuration::from_mins(15))
             .unwrap(),
     );
-    assert_eq!(r.payments.expire_stale().await.unwrap(), 1);
+    assert_eq!(r.payments.expire_stale().await.unwrap().len(), 1);
     let (state, _) = r
         .payments
         .status(IntentId::new(Uuid::from_u128(101)))

@@ -48,7 +48,12 @@ pub struct Agent {
     ids: Arc<dyn IdGen>,
     step_limit: u32,
     briefing: Briefing,
+    paused: Paused,
 }
+
+/// Whether the owner has paused sending, so a result never says "sending now"
+/// while nothing will go out. The executor's switch lives outside this crate.
+pub type Paused = Arc<dyn Fn() -> bool + Send + Sync>;
 
 impl std::fmt::Debug for Agent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -85,6 +90,7 @@ impl Agent {
             ids,
             step_limit: STEP_LIMIT,
             briefing: Briefing::default(),
+            paused: Arc::new(|| false),
         }
     }
 
@@ -96,6 +102,12 @@ impl Agent {
     /// Tells the model which network, assets and limits it works with.
     pub fn with_briefing(mut self, briefing: Briefing) -> Self {
         self.briefing = briefing;
+        self
+    }
+
+    /// Reads the owner's pause switch when describing proposals.
+    pub fn with_pause(mut self, paused: Paused) -> Self {
+        self.paused = paused;
         self
     }
 
@@ -229,7 +241,7 @@ impl Agent {
             ToolOutput::ProposedPayment(intent) => {
                 let summary = format!("{} to {}", intent.amount, intent.to.label);
                 let outcome = self.payments.propose(intent).await?;
-                Ok((describe(&outcome, &summary), Some(outcome)))
+                Ok((describe(&outcome, &summary, (self.paused)()), Some(outcome)))
             }
             ToolOutput::DraftInvoice(invoice) => Ok((
                 json!({ "status": "draft", "invoice_id": invoice.id.to_string(), "total": invoice.total.to_string() }),
@@ -240,8 +252,15 @@ impl Agent {
 }
 
 /// What the model is told about a proposal.
-fn describe(outcome: &ProposeOutcome, summary: &str) -> Value {
+fn describe(outcome: &ProposeOutcome, summary: &str, paused: bool) -> Value {
     match outcome {
+        ProposeOutcome::Queued { intent } if paused => json!({
+            "status": "allowed",
+            "paused": true,
+            "intent_id": intent.to_string(),
+            "payment": summary,
+            "note": "Within policy, but the owner has paused payments. It is queued and goes out once they send /resume; nothing has been sent."
+        }),
         ProposeOutcome::Queued { intent } => json!({
             "status": "allowed",
             "intent_id": intent.to_string(),
@@ -269,5 +288,32 @@ fn describe(outcome: &ProposeOutcome, summary: &str) -> Value {
             "intent_id": intent.to_string(),
             "note": "Already proposed; nothing new was created."
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_queued_payment_says_when_sending_is_paused() {
+        let intent = warden_domain::IntentId::new(uuid::Uuid::nil());
+        let outcome = ProposeOutcome::Queued { intent };
+        let running = describe(&outcome, "1 SOL to Bob", false);
+        assert!(running.get("paused").is_none());
+        assert!(
+            running["note"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("Sending now")
+        );
+        let paused = describe(&outcome, "1 SOL to Bob", true);
+        assert_eq!(paused["paused"], true);
+        assert!(
+            paused["note"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("/resume")
+        );
     }
 }

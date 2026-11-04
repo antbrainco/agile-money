@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use warden_domain::{AgentId, Intent, Invoice, Proposed, RunId, ToolCallId, Untrusted};
 
-pub use agent::{Agent, NoObserver, RunObserver, RunReport};
+pub use agent::{Agent, NoObserver, Paused, RunObserver, RunReport};
 pub use llm::{Detection, LlmClient, LlmSettings, Provider, Source};
 pub use prompt::{Briefing, SYSTEM_PROMPT, system_prompt};
 
