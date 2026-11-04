@@ -32,6 +32,10 @@ use warden_domain::{
     SolAddress, SolSignature, Submission, TokenContract,
 };
 
+pub mod vault;
+
+pub use vault::{Vault, VaultConfig};
+
 pub const RAIL_ID: RailId = RailId::Sol;
 
 pub const DEVNET_URL: &str = "https://api.devnet.solana.com";
@@ -79,6 +83,10 @@ pub struct SolConfig {
     /// Base58 secret key, or the JSON byte array `solana-keygen` writes.
     /// Fine for devnet; with real funds, keep the key in a KMS or HSM, not env.
     pub keypair: SecretString,
+    /// When set, SOL is paid from this on-chain vault, which holds the funds
+    /// and enforces the owner's caps; the keypair above only asks it to pay.
+    #[serde(default)]
+    pub vault: Option<VaultConfig>,
 }
 
 fn default_rpc_url() -> Url {
@@ -124,6 +132,7 @@ pub struct SolRail {
     payer: Keypair,
     /// SPL tokens this rail may send, besides SOL. All on the classic Token program.
     tokens: Vec<Asset>,
+    vault: Option<Vault>,
 }
 
 impl std::fmt::Debug for SolRail {
@@ -132,6 +141,7 @@ impl std::fmt::Debug for SolRail {
             .field("rpc", &self.rpc.url())
             .field("payer", &self.payer.pubkey())
             .field("tokens", &self.tokens)
+            .field("vault", &self.vault.map(|v| v.address))
             .finish()
     }
 }
@@ -145,7 +155,48 @@ impl SolRail {
             ),
             payer: parse_keypair(config.keypair.expose_secret())?,
             tokens: Vec::new(),
+            vault: config.vault.as_ref().map(Vault::from_config),
         })
+    }
+
+    pub fn vault(&self) -> Option<&Vault> {
+        self.vault.as_ref()
+    }
+
+    /// The vault's state on chain, which must exist and name this rail's key as
+    /// its agent. `None` when no vault is configured.
+    pub async fn check_vault(&self) -> Result<Option<vault::State>, RailError> {
+        let Some(vault) = &self.vault else {
+            return Ok(None);
+        };
+        let account = self
+            .rpc
+            .get_account_with_commitment(&vault.address, CommitmentConfig::confirmed())
+            .await
+            .map_err(classify)?
+            .value
+            .ok_or_else(|| {
+                RailError::Rejected(format!(
+                    "vault {} is not open on this network",
+                    vault.address
+                ))
+            })?;
+        let state = (account.owner == vault.program)
+            .then(|| vault::State::decode(&account.data))
+            .flatten()
+            .ok_or_else(|| {
+                RailError::Rejected(format!(
+                    "{} is not a vault of {}",
+                    vault.address, vault.program
+                ))
+            })?;
+        if state.limits.agent != self.payer.pubkey() {
+            return Err(RailError::Rejected(format!(
+                "vault {} answers to {}, not this wallet",
+                vault.address, state.limits.agent
+            )));
+        }
+        Ok(Some(state))
     }
 
     /// Lets the rail send these SPL tokens. Each needs an `SplMint` contract.
@@ -196,7 +247,13 @@ impl SolRail {
     /// The wallet's balance of `asset` in minor units. No token account yet means 0.
     pub async fn balance_of(&self, asset: &Asset) -> Result<u128, RailError> {
         let Some(mint) = mint_of(asset) else {
-            return self.balance().await.map(u128::from);
+            let holder = self.vault.map_or(self.payer.pubkey(), |v| v.address);
+            return self
+                .rpc
+                .get_balance(&holder)
+                .await
+                .map(u128::from)
+                .map_err(classify);
         };
         let account = token_account(&self.payer.pubkey(), &mint);
         let exists = self
@@ -488,6 +545,21 @@ fn classify(err: ClientError) -> RailError {
     }
 }
 
+/// Like `classify`, but a refusal from the vault (instruction 0) reads as its reason.
+fn classify_vault(err: ClientError) -> RailError {
+    use solana_sdk::instruction::InstructionError;
+    use solana_sdk::transaction::TransactionError;
+    match err.get_transaction_error() {
+        Some(TransactionError::InstructionError(0, InstructionError::Custom(code))) => {
+            match vault::refusal(code) {
+                Some(reason) => RailError::Rejected(format!("the vault refused: {reason}")),
+                None => RailError::Rejected(format!("the vault refused (code {code})")),
+            }
+        }
+        _ => classify(err),
+    }
+}
+
 fn transport(msg: String) -> RailError {
     RailError::Transport(msg)
 }
@@ -553,13 +625,24 @@ impl Rail for SolRail {
             return Ok(submission(signature));
         }
 
-        let mut instructions = transfer_instructions(
-            &self.payer.pubkey(),
-            &to,
-            &intent.amount.asset,
-            amount,
-            reference,
-        )?;
+        let via_vault = self
+            .vault
+            .filter(|_| mint_of(&intent.amount.asset).is_none());
+        let mut instructions = match &via_vault {
+            Some(vault) => vec![vault.pay(
+                &self.payer.pubkey(),
+                &to,
+                amount,
+                &[AccountMeta::new_readonly(reference, false)],
+            )],
+            None => transfer_instructions(
+                &self.payer.pubkey(),
+                &to,
+                &intent.amount.asset,
+                amount,
+                reference,
+            )?,
+        };
         let memo_text = match &intent.memo {
             Some(memo) => format!("tilly {}: {memo}", intent.id),
             None => format!("tilly {}", intent.id),
@@ -581,8 +664,11 @@ impl Rail for SolRail {
             .rpc
             .send_and_confirm_transaction(&tx)
             .await
-            .map_err(classify)?;
-        tracing::info!(%signature, amount = %intent.amount, "sent");
+            .map_err(|e| match via_vault {
+                Some(_) => classify_vault(e),
+                None => classify(e),
+            })?;
+        tracing::info!(%signature, amount = %intent.amount, vault = via_vault.is_some(), "sent");
         Ok(submission(signature))
     }
 
@@ -744,6 +830,7 @@ mod tests {
         let config = SolConfig {
             rpc_url: default_rpc_url(),
             keypair: SecretString::from(Keypair::new().to_base58_string()),
+            vault: None,
         };
         let rail = SolRail::new(&config).unwrap();
         assert!(rail.with_tokens(vec![sol()]).is_err());

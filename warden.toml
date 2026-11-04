@@ -78,6 +78,15 @@ cf-aig-gateway-id = "my-gateway"
 rpc_url = "https://api.devnet.solana.com"
 mainnet = false
 
+# On-chain vault (contracts/sol/vault): SOL is held by the program and paid out only
+# within the per-payment cap, daily cap and recipient list the owner key signed for.
+# The bot's keypair can ask it to pay but can't change those. Set up with
+# `cargo run -p warden-rail-sol --example vault`; both values are public keys.
+# Remove this section to pay from the bot's wallet again.
+[rail.sol.vault]
+program = "<VAULT_PROGRAM_ID>"
+owner = "<OWNER_PUBKEY>"
+
 # PayPal: payment requests in USD as checkout links, paid by PayPal or card. On when
 # WARDEN_RAIL__PAYPAL__CLIENT_ID and WARDEN_RAIL__PAYPAL__CLIENT_SECRET are set, from a
 # sandbox REST app at developer.paypal.com. Sandbox unless live = true (rule 5).

@@ -27,6 +27,7 @@ fn rail() -> Option<SolRail> {
             .parse()
             .expect("valid RPC URL"),
         keypair: SecretString::from(keypair),
+        vault: None,
     })
     .expect("valid keypair");
     Some(rail)

@@ -65,6 +65,19 @@ async fn main() -> anyhow::Result<()> {
     let cluster = rail.cluster().await?;
     config.check_cluster(cluster)?;
     rail.check_tokens().await?;
+    if let Some(state) = rail.check_vault().await? {
+        let vault = rail
+            .vault()
+            .map(|v| v.address.to_string())
+            .unwrap_or_default();
+        tracing::info!(
+            %vault,
+            max_per_tx = state.limits.max_per_tx,
+            max_per_day = state.limits.max_per_day,
+            recipients = state.limits.recipients.len(),
+            "SOL is paid from the on-chain vault"
+        );
+    }
     let paypal = match &config.rail.paypal {
         Some(conf) => {
             let paypal = Arc::new(PaypalRail::new(conf)?);

@@ -260,6 +260,12 @@ fn command(text: &str) -> &str {
 
 async fn balances(app: &App) -> String {
     let mut lines = vec![format!("Wallet {}", app.rail.address())];
+    if let Some(vault) = app.rail.vault() {
+        lines.push(format!(
+            "SOL is held in vault {}, which enforces its own caps; the wallet pays fees and tokens.",
+            vault.address
+        ));
+    }
     for asset in app.rail.assets() {
         lines.push(match app.rail.balance_of(&asset).await {
             Ok(minor) => format!("{}", warden_domain::Amount::new(minor, asset)),
