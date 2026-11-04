@@ -103,7 +103,8 @@ const send = (body: unknown, method = "POST"): RequestInit => ({
 
 export const api = {
   session: () => call<{ signedIn: boolean }>("/auth/session"),
-  login: (password: string) => call<{ ok: true }>("/auth/login", send({ password })),
+  login: (password: string, code?: string) =>
+    call<{ ok: true }>("/auth/login", send({ password, code })),
   logout: () => call<{ ok: true }>("/auth/logout", send({})),
   overview: () => call<Overview>("/api/overview"),
   approvals: () => call<IntentRow[]>("/api/approvals"),

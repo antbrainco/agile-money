@@ -147,6 +147,10 @@ fn check(
             ))
         }
         Rule::QuietHours { from, to, tz } => quiet_hours(now, *from, *to, tz),
+        Rule::ApprovalAfterCount { count } if spend.payments >= *count => require(format!(
+            "already {} payments in this window; past {count}, each one asks you",
+            spend.payments
+        )),
         Rule::ApproveFirstPayment if !spend.recipient_paid => require(format!(
             "first payment to {} ({})",
             intent.to.label,

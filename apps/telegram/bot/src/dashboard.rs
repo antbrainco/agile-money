@@ -64,6 +64,7 @@ pub async fn serve(config: &DashboardConfig, app: Arc<App>, bot: Bot) -> anyhow:
         token: Arc::new(config.token.clone()),
     };
     let router = Router::new()
+        .route("/api/sign-in", post(sign_in))
         .route("/api/overview", get(overview))
         .route("/api/approvals", get(approvals))
         .route("/api/approvals/{id}/{action}", post(answer))
@@ -292,7 +293,7 @@ async fn answer(
         .await
         .map_err(|e| failure(StatusCode::CONFLICT, e))?;
     // The first answer wins; close the card so it can't be pressed too.
-    if let Some(card) = api.app.cards.close(approval) {
+    if let Some(card) = api.app.cards.close(approval).await {
         let text = format!("{message} (answered on the dashboard)");
         if let Err(e) = api.bot.edit_message_text(api.app.owner, card, text).await {
             tracing::warn!(error = %e, "approval card not closed");
@@ -614,6 +615,42 @@ fn loosens(current: &[Rule], next: &[Rule]) -> bool {
             .iter()
             .any(|(k, old)| *k == kind && old.asset == amount.asset && amount.minor <= old.minor)
     })
+}
+
+#[derive(Deserialize)]
+struct SignIn {
+    #[serde(default)]
+    code: Option<String>,
+}
+
+/// The dashboard's second step after the password: checks the owner's code
+/// once codes are set up, and tells Telegram, so a stolen password shows.
+async fn sign_in(State(api): State<Api>, Json(req): Json<SignIn>) -> Reply<serde_json::Value> {
+    let app = &api.app;
+    let guard = app.contacts.guard();
+    if guard.enabled() {
+        let code = req
+            .code
+            .as_deref()
+            .filter(|c| !c.trim().is_empty())
+            .ok_or_else(|| {
+                failure(
+                    StatusCode::UNAUTHORIZED,
+                    "Enter the code from your authenticator app.",
+                )
+            })?;
+        guard
+            .check(code, Timestamp::now())
+            .map_err(|e| failure(StatusCode::UNAUTHORIZED, e.to_string()))?;
+    }
+    tracing::info!("dashboard signed in");
+    app.contacts
+        .notify(
+            "Someone signed in to the dashboard. If that wasn't you, send /pause and change the dashboard password.".into(),
+            None,
+        )
+        .await;
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 #[derive(Deserialize)]

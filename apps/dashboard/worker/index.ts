@@ -1,6 +1,7 @@
-// The dashboard's Worker: the owner signs in with a password, then `/api/*` is
-// forwarded to the bot's API with the bot's token. The token never reaches the
-// browser; the browser holds only a signed, short-lived session cookie.
+// The dashboard's Worker: the owner signs in with a password and, once codes are
+// set up, an authenticator code the bot checks. Then `/api/*` is forwarded to the
+// bot's API with the bot's token. The token never reaches the browser; the
+// browser holds only a signed, short-lived session cookie.
 
 interface Secrets {
   /** The bot's DASHBOARD_TOKEN. */
@@ -41,12 +42,26 @@ export default {
 } satisfies ExportedHandler<Bindings>;
 
 async function login(request: Request, env: Bindings): Promise<Response> {
-  const body = (await request.json().catch(() => ({}))) as { password?: unknown };
+  // Slows password guessing. Approximate and per location; the bot's code check
+  // behind it is strict (five wrong codes lock codes for 15 minutes).
+  const ip = request.headers.get("cf-connecting-ip") ?? "local";
+  const [perIp, overall] = await Promise.all([
+    env.LOGIN_LIMIT.limit({ key: `ip:${ip}` }),
+    env.LOGIN_LIMIT_ALL.limit({ key: "all" }),
+  ]);
+  if (!perIp.success || !overall.success) {
+    return json({ error: "Too many sign-in attempts. Wait a minute." }, 429);
+  }
+  const body = (await request.json().catch(() => ({}))) as { password?: unknown; code?: unknown };
   // Copying from a file often brings a trailing newline or space along.
   const given = typeof body.password === "string" ? body.password.trim() : "";
   if (!(await equal(given, env.DASHBOARD_PASSWORD))) {
     return json({ error: "wrong password" }, 401);
   }
+  // The bot checks the code, or says none is set up, and tells Telegram.
+  const code = typeof body.code === "string" ? body.code : undefined;
+  const check = await forwardJson("/api/sign-in", { code }, env);
+  if (!check.ok) return check;
   const expires = Math.floor(Date.now() / 1000) + SESSION_SECONDS;
   const value = `${expires}.${await sign(String(expires), env)}`;
   return json({ ok: true }, 200, cookie(value, SESSION_SECONDS, new URL(request.url)));
@@ -75,6 +90,26 @@ async function forward(request: Request, url: URL, env: Bindings): Promise<Respo
   }
   try {
     const reply = await fetch(target, init);
+    return new Response(reply.body, {
+      status: reply.status,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    });
+  } catch {
+    return json({ error: "Tilly is not reachable. Is the bot running?" }, 502);
+  }
+}
+
+/** POSTs JSON to the bot from the Worker itself, not on the browser's behalf. */
+async function forwardJson(path: string, body: unknown, env: Bindings): Promise<Response> {
+  try {
+    const reply = await fetch(new URL(path, env.BOT_API_URL), {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${env.DASHBOARD_TOKEN}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
     return new Response(reply.body, {
       status: reply.status,
       headers: { "content-type": "application/json", "cache-control": "no-store" },

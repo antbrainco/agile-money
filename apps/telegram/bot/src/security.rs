@@ -24,6 +24,10 @@ pub struct SecurityConfig {
     /// hijacked session can't add a payee and pay it at once.
     #[serde(default = "cooling_off")]
     pub cooling_off: SignedDuration,
+    /// Payments a day that may go through without asking; past this, each
+    /// one needs approval, so a manipulated agent can't drain contacts slowly.
+    #[serde(default = "payments_per_day")]
+    pub payments_per_day: u32,
 }
 
 impl Default for SecurityConfig {
@@ -31,12 +35,17 @@ impl Default for SecurityConfig {
         Self {
             totp_secret: None,
             cooling_off: cooling_off(),
+            payments_per_day: payments_per_day(),
         }
     }
 }
 
 fn cooling_off() -> SignedDuration {
     SignedDuration::from_hours(24)
+}
+
+fn payments_per_day() -> u32 {
+    5
 }
 
 /// Builds the TOTP the authenticator app shares. SHA-1, 6 digits, 30 seconds:

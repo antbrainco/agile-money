@@ -45,6 +45,10 @@ pub fn briefing(config: &Config, assets: &[AssetPolicy]) -> Briefing {
     let mut limits = vec![
         "Only saved contacts can be paid; any other address is denied.".into(),
         "The first payment to any contact needs the owner's approval, whatever the amount.".into(),
+        format!(
+            "After {} payments in 24 hours, each further payment needs the owner's approval.",
+            config.security.payments_per_day
+        ),
     ];
     for a in assets {
         limits.push(format!(
@@ -78,6 +82,9 @@ fn rules(config: &Config, assets: &[AssetPolicy]) -> Vec<Rule> {
                 .collect(),
         },
         Rule::ApproveFirstPayment,
+        Rule::ApprovalAfterCount {
+            count: config.security.payments_per_day,
+        },
     ];
     // Each limit only applies to its own asset; AllowAssets keeps out the rest.
     for a in assets {

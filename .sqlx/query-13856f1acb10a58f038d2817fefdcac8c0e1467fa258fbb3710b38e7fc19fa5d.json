@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO approval_cards (approval_id, message_id) VALUES ($1, $2)\n             ON CONFLICT (approval_id) DO UPDATE SET message_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "13856f1acb10a58f038d2817fefdcac8c0e1467fa258fbb3710b38e7fc19fa5d"
+}

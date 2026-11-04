@@ -16,6 +16,7 @@ async fn creates_all_tables(pool: PgPool) {
     assert_eq!(
         tables,
         [
+            "approval_cards",
             "contacts",
             "events",
             "idempotency",

@@ -41,6 +41,12 @@ pub enum Rule {
     /// The first payment to an address waits for the owner, whatever the
     /// amount: a newly saved or mistyped contact can't be paid unseen.
     ApproveFirstPayment,
+    /// After `count` payments in the window, any asset, each further one
+    /// waits for the owner however small: injected text can't drain saved
+    /// contacts a little at a time.
+    ApprovalAfterCount {
+        count: u32,
+    },
 }
 
 /// What rules read instead of the database, for the intent's asset.
@@ -53,4 +59,7 @@ pub struct SpendSnapshot {
     /// A payment to this intent's recipient has been confirmed before.
     #[serde(default)]
     pub recipient_paid: bool,
+    /// Payments sent or on their way in the window, any asset.
+    #[serde(default)]
+    pub payments: u32,
 }

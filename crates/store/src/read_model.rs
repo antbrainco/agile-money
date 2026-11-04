@@ -39,7 +39,10 @@ impl ReadModel for PgStore {
         let row = sqlx::query!(
             r#"SELECT
                  COALESCE(SUM(amount_minor) FILTER (WHERE state = 'confirmed'), 0)::text AS "settled!",
-                 COALESCE(SUM(amount_minor) FILTER (WHERE state = ANY($4)), 0)::text AS "reserved!"
+                 COALESCE(SUM(amount_minor) FILTER (WHERE state = ANY($4)), 0)::text AS "reserved!",
+                 (SELECT COUNT(*) FROM intents_view
+                  WHERE agent_id = $1 AND created_at >= $3
+                    AND (state = 'confirmed' OR state = ANY($4)))::int4 AS "payments!"
                FROM intents_view
                WHERE agent_id = $1 AND asset = $2 AND created_at >= $3"#,
             agent.as_uuid(),
@@ -55,6 +58,7 @@ impl ReadModel for PgStore {
             reserved: Amount::new(row.reserved.parse().map_err(backend)?, asset.clone()),
             window_start: since,
             recipient_paid: false,
+            payments: u32::try_from(row.payments).unwrap_or(u32::MAX),
         })
     }
 

@@ -104,6 +104,9 @@ max_per_day = "100"
 # A new or changed contact waits this long before it can be paid, so a stolen
 # Telegram session can't add a payee and pay it at once. Cancel any time.
 cooling_off = "24h"
+# Payments a day that may go through on their own; past this, each one asks you,
+# however small, so injected text can't drain saved contacts a little at a time.
+payments_per_day = 5
 
 # Who the agent may pay; anything else is denied by policy. Seeded as live contacts at startup. Add more from Telegram (/addcontact) or the
 # dashboard; those need a code and wait out the cooling-off.

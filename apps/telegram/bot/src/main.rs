@@ -81,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
     let clock = Arc::new(SystemClock);
     let ids: Arc<dyn IdGen> = Arc::new(UuidV7);
     let store_arc = Arc::new(store.clone());
-    let cards = Cards::default();
+    let cards = Cards(store.clone());
 
     let payments = Payments::new(
         store_arc.clone(),
@@ -192,7 +192,10 @@ async fn main() -> anyhow::Result<()> {
                 tracing::info!(expired = expired.len(), "approvals expired");
             }
             // Take the buttons off, so an expired card can't look answerable.
-            for card in expired.into_iter().filter_map(|a| sweeper_cards.close(a)) {
+            for approval in expired {
+                let Some(card) = sweeper_cards.close(approval).await else {
+                    continue;
+                };
                 let text = "This approval expired. Nothing was sent.";
                 if let Err(e) = sweeper_bot.edit_message_text(owner, card, text).await {
                     tracing::warn!(error = %e, "expired approval card not closed");

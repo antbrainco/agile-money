@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM approval_cards WHERE approval_id = $1 RETURNING message_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "message_id",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "approval_cards",
+            "name": "message_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d7a8fcf7ef1a95119742e29b7ed91bfa805e3157c6a9c96c8b9cc2b54e6473dd"
+}

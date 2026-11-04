@@ -1,4 +1,4 @@
-//! Saved payees and the pause switch.
+//! Saved payees, the pause switch and open approval cards.
 
 use jiff::Timestamp;
 use uuid::Uuid;
@@ -253,5 +253,32 @@ impl PgStore {
         .await
         .map_err(backend)?;
         Ok(())
+    }
+}
+
+impl PgStore {
+    /// Remembers which message carries an approval's buttons.
+    pub async fn open_card(&self, approval: Uuid, message: i32) -> Result<(), StoreError> {
+        sqlx::query!(
+            "INSERT INTO approval_cards (approval_id, message_id) VALUES ($1, $2)
+             ON CONFLICT (approval_id) DO UPDATE SET message_id = $2",
+            approval,
+            message,
+        )
+        .execute(self.pool())
+        .await
+        .map_err(backend)?;
+        Ok(())
+    }
+
+    /// The card's message, once: whoever closes it first edits it.
+    pub async fn close_card(&self, approval: Uuid) -> Result<Option<i32>, StoreError> {
+        sqlx::query_scalar!(
+            "DELETE FROM approval_cards WHERE approval_id = $1 RETURNING message_id",
+            approval,
+        )
+        .fetch_optional(self.pool())
+        .await
+        .map_err(backend)
     }
 }

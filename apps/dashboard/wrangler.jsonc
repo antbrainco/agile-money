@@ -14,5 +14,10 @@
   },
   // Secrets (wrangler secret put): DASHBOARD_TOKEN, the bot's API token, and
   // DASHBOARD_PASSWORD, the owner's sign-in.
+  // Sign-in attempts: 5 a minute from one address, 20 a minute overall.
+  "ratelimits": [
+    { "name": "LOGIN_LIMIT", "namespace_id": "4801", "simple": { "limit": 5, "period": 60 } },
+    { "name": "LOGIN_LIMIT_ALL", "namespace_id": "4802", "simple": { "limit": 20, "period": 60 } }
+  ],
   "observability": { "enabled": true }
 }

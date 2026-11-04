@@ -140,7 +140,7 @@ impl ReadModel for MemStore {
         since: Timestamp,
     ) -> Result<SpendSnapshot, StoreError> {
         let inner = self.lock();
-        let (mut settled, mut reserved) = (0u128, 0u128);
+        let (mut settled, mut reserved, mut payments) = (0u128, 0u128, 0u32);
         for (stream, history) in &inner.streams {
             let Some(id) = stream.as_intent() else {
                 continue;
@@ -149,7 +149,7 @@ impl ReadModel for MemStore {
             let backend = |e: crate::Error| StoreError::Backend(e.to_string());
             let intent =
                 Intent::<Proposed>::from_history(id, events.iter().copied()).map_err(backend)?;
-            if intent.agent != agent || &intent.amount.asset != asset || intent.created_at < since {
+            if intent.agent != agent || intent.created_at < since {
                 continue;
             }
             let bucket = match IntentState::replay(events).map_err(backend)? {
@@ -159,13 +159,17 @@ impl ReadModel for MemStore {
                 | IntentState::Failed { .. } => &mut reserved,
                 _ => continue,
             };
-            *bucket = bucket.saturating_add(intent.amount.minor);
+            payments = payments.saturating_add(1);
+            if &intent.amount.asset == asset {
+                *bucket = bucket.saturating_add(intent.amount.minor);
+            }
         }
         Ok(SpendSnapshot {
             settled: Amount::new(settled, asset.clone()),
             reserved: Amount::new(reserved, asset.clone()),
             window_start: since,
             recipient_paid: false,
+            payments,
         })
     }
 

@@ -93,25 +93,27 @@ impl std::fmt::Debug for App {
 }
 
 /// The open approval cards in the owner's chat, so an answer given on the
-/// dashboard can close the card too (rule 8: the first answer wins). Held in
-/// memory: after a restart an old card's buttons still work but stay up.
-#[derive(Debug, Clone, Default)]
-pub struct Cards(Arc<Mutex<std::collections::HashMap<ApprovalId, MessageId>>>);
+/// dashboard or an expiry can close the card too (rule 8: the first answer
+/// wins). Stored, so a restart doesn't leave stale buttons up.
+#[derive(Debug, Clone)]
+pub struct Cards(pub PgStore);
 
 impl Cards {
-    fn open(&self, approval: ApprovalId, message: MessageId) {
-        self.0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(approval, message);
+    async fn open(&self, approval: ApprovalId, message: MessageId) {
+        if let Err(e) = self.0.open_card(approval.as_uuid(), message.0).await {
+            tracing::warn!(error = %e, "approval card not remembered");
+        }
     }
 
     /// The card's message, once; later calls get `None`.
-    pub fn close(&self, approval: ApprovalId) -> Option<MessageId> {
-        self.0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(&approval)
+    pub async fn close(&self, approval: ApprovalId) -> Option<MessageId> {
+        match self.0.close_card(approval.as_uuid()).await {
+            Ok(message) => message.map(MessageId),
+            Err(e) => {
+                tracing::warn!(error = %e, "approval card not looked up");
+                None
+            }
+        }
     }
 }
 
@@ -153,7 +155,7 @@ impl Approver for TelegramApprover {
             .reply_markup(keyboard)
             .await
             .map_err(|e| warden_policy::Error::Channel(e.to_string()))?;
-        self.cards.open(approval.id, sent.id);
+        self.cards.open(approval.id, sent.id).await;
         Ok(())
     }
 }
@@ -576,7 +578,7 @@ async fn resolve(app: &App, data: &str) -> Result<String, String> {
     };
     let answer = answer(app, approval, grant).await;
     // This card is edited by the caller.
-    app.cards.close(approval);
+    app.cards.close(approval).await;
     answer
 }
 

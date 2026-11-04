@@ -38,6 +38,7 @@ export function App() {
 
 function Login({ onDone }: { onDone: () => void }) {
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const submit = async (e: FormEvent) => {
@@ -45,7 +46,7 @@ function Login({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      await api.login(password);
+      await api.login(password, code || undefined);
       onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -67,6 +68,10 @@ function Login({ onDone }: { onDone: () => void }) {
             onChange={(e) => setPassword(e.target.value)}
             autoFocus
           />
+        </label>
+        <label>
+          Authenticator code
+          <CodeInput value={code} onChange={setCode} />
         </label>
         {error && <p className="error">{error}</p>}
         <button className="primary" disabled={busy || !password}>

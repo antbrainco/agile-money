@@ -86,3 +86,12 @@ async fn pause_survives_and_defaults_to_running(pool: PgPool) {
     store.set_paused(agent, false).await.unwrap();
     assert!(!store.paused(agent).await.unwrap());
 }
+
+#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+async fn a_card_closes_once(pool: PgPool) {
+    let store = PgStore::from_pool(pool);
+    let approval = Uuid::from_u128(7);
+    store.open_card(approval, 42).await.unwrap();
+    assert_eq!(store.close_card(approval).await.unwrap(), Some(42));
+    assert_eq!(store.close_card(approval).await.unwrap(), None);
+}

@@ -73,6 +73,7 @@ fn spend(settled: u128, reserved: u128) -> SpendSnapshot {
         reserved: Amount::new(reserved, usdc()),
         window_start: Timestamp::UNIX_EPOCH,
         recipient_paid: true,
+        payments: 0,
     }
 }
 
@@ -152,6 +153,26 @@ fn first_payment_to_an_address_needs_approval_however_small() {
         eval(Some(&p), &intent(1, acme()), &spend(0, 0)),
         Decision::Allow
     );
+}
+
+#[test]
+fn past_the_count_every_payment_asks_however_small() {
+    let mut p = policy();
+    p.rules.push(Rule::ApprovalAfterCount { count: 5 });
+    let busy = |payments| SpendSnapshot {
+        payments,
+        ..spend(0, 0)
+    };
+    assert_eq!(
+        eval(Some(&p), &intent(1, acme()), &busy(4)),
+        Decision::Allow
+    );
+    match eval(Some(&p), &intent(1, acme()), &busy(5)) {
+        Decision::RequireApproval { reasons } => {
+            assert!(reasons[0].starts_with("already 5 payments"))
+        }
+        other => panic!("expected approval, got {other:?}"),
+    }
 }
 
 proptest! {
