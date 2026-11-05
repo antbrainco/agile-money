@@ -2,11 +2,11 @@
 
 #![allow(clippy::unwrap_used)] // helpers outside #[test] fns, which clippy.toml does not cover
 
+use agile_money_domain::{Address, AgentId, SolAddress};
+use agile_money_store::{Contact, ContactSource, ContactState, PgStore};
 use jiff::{SignedDuration, Timestamp};
 use sqlx::PgPool;
 use uuid::Uuid;
-use warden_domain::{Address, AgentId, SolAddress};
-use warden_store::{Contact, ContactSource, ContactState, PgStore};
 
 fn contact(label: &str, byte: u8, state: ContactState) -> Contact {
     Contact {
@@ -23,7 +23,7 @@ fn contact(label: &str, byte: u8, state: ContactState) -> Contact {
     }
 }
 
-#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+#[sqlx::test(migrator = "agile_money_store::MIGRATOR")]
 async fn a_contact_moves_once_and_closed_ones_drop_out(pool: PgPool) {
     let store = PgStore::from_pool(pool);
     let agent = AgentId::new(Uuid::from_u128(1));
@@ -62,7 +62,7 @@ async fn a_contact_moves_once_and_closed_ones_drop_out(pool: PgPool) {
     assert!(store.contacts(agent).await.unwrap().is_empty());
 }
 
-#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+#[sqlx::test(migrator = "agile_money_store::MIGRATOR")]
 async fn two_live_contacts_cannot_share_an_address(pool: PgPool) {
     let store = PgStore::from_pool(pool);
     let agent = AgentId::new(Uuid::from_u128(1));
@@ -76,7 +76,7 @@ async fn two_live_contacts_cannot_share_an_address(pool: PgPool) {
     assert!(twin.is_err());
 }
 
-#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+#[sqlx::test(migrator = "agile_money_store::MIGRATOR")]
 async fn pause_survives_and_defaults_to_running(pool: PgPool) {
     let store = PgStore::from_pool(pool);
     let agent = AgentId::new(Uuid::from_u128(1));
@@ -87,7 +87,7 @@ async fn pause_survives_and_defaults_to_running(pool: PgPool) {
     assert!(!store.paused(agent).await.unwrap());
 }
 
-#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+#[sqlx::test(migrator = "agile_money_store::MIGRATOR")]
 async fn a_card_closes_once(pool: PgPool) {
     let store = PgStore::from_pool(pool);
     let approval = Uuid::from_u128(7);
@@ -96,7 +96,7 @@ async fn a_card_closes_once(pool: PgPool) {
     assert_eq!(store.close_card(approval).await.unwrap(), None);
 }
 
-#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+#[sqlx::test(migrator = "agile_money_store::MIGRATOR")]
 async fn an_enrolled_code_is_stored_once(pool: PgPool) {
     let store = PgStore::from_pool(pool);
     let agent = AgentId::new(Uuid::from_u128(1));
@@ -109,11 +109,11 @@ async fn an_enrolled_code_is_stored_once(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+#[sqlx::test(migrator = "agile_money_store::MIGRATOR")]
 async fn wallets_link_up_to_the_limit_and_unlink(pool: PgPool) {
     let store = PgStore::from_pool(pool);
     let agent = AgentId::new(Uuid::from_u128(1));
-    for n in 0..warden_store::MAX_WALLETS {
+    for n in 0..agile_money_store::MAX_WALLETS {
         assert!(
             store
                 .link_wallet(agent, &format!("W{n}"), "phone")
@@ -130,13 +130,13 @@ async fn wallets_link_up_to_the_limit_and_unlink(pool: PgPool) {
     // Renaming a linked wallet isn't a new one.
     assert!(store.link_wallet(agent, "W0", "laptop").await.unwrap());
     let wallets = store.owner_wallets(agent).await.unwrap();
-    assert_eq!(wallets.len() as i64, warden_store::MAX_WALLETS);
+    assert_eq!(wallets.len() as i64, agile_money_store::MAX_WALLETS);
     assert_eq!(wallets[0].label, "laptop");
     assert!(store.unlink_wallet(agent, "W0").await.unwrap());
     assert!(!store.unlink_wallet(agent, "W0").await.unwrap());
 }
 
-#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+#[sqlx::test(migrator = "agile_money_store::MIGRATOR")]
 async fn telegram_link_is_replaced(pool: PgPool) {
     let store = PgStore::from_pool(pool);
     let agent = AgentId::new(Uuid::from_u128(1));

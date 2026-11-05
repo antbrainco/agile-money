@@ -14,8 +14,8 @@ use teloxide::types::AllowedUpdate;
 use teloxide::update_listeners::{UpdateListener, webhooks};
 use url::Url;
 
-/// `[telegram.webhook]`. Env overrides: `TUNNEL_URL` or `WARDEN_TELEGRAM__WEBHOOK__URL`
-/// for the URL, `TELEGRAM_WEBHOOK_SECRET` or `WARDEN_TELEGRAM__WEBHOOK__SECRET` for the
+/// `[telegram.webhook]`. Env overrides: `TUNNEL_URL` or `AGILE_MONEY_TELEGRAM__WEBHOOK__URL`
+/// for the URL, `TELEGRAM_WEBHOOK_SECRET` or `AGILE_MONEY_TELEGRAM__WEBHOOK__SECRET` for the
 /// secret. Webhook mode is on when a URL is set; otherwise the bot long-polls.
 #[derive(Debug, Clone, Deserialize)]
 pub struct WebhookConfig {

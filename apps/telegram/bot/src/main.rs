@@ -1,4 +1,4 @@
-//! Tilly on Telegram: chat with the agent and answer approval requests. The
+//! Agile Money on Telegram: chat with the agent and answer approval requests. The
 //! executor and the approval sweeper run in the same process.
 
 mod config;
@@ -14,19 +14,19 @@ mod webhook;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use agile_money_agent_core::tools::{
+    ContactBook, ListContacts, PaymentStatus, ProposeContact, ProposePayment, RequestPayment,
+};
+use agile_money_agent_core::{Agent, DynTool};
+use agile_money_domain::ports::{IdGen, Rail, SystemClock, UuidV7};
+use agile_money_executor::{Executor, PauseSwitch};
+use agile_money_policy::Payments;
+use agile_money_rail_paypal::PaypalRail;
+use agile_money_rail_sol::SolRail;
+use agile_money_store::PgStore;
 use secrecy::ExposeSecret;
 use teloxide::prelude::*;
 use tracing_subscriber::EnvFilter;
-use warden_agent_core::tools::{
-    ContactBook, ListContacts, PaymentStatus, ProposeContact, ProposePayment, RequestPayment,
-};
-use warden_agent_core::{Agent, DynTool};
-use warden_domain::ports::{IdGen, Rail, SystemClock, UuidV7};
-use warden_executor::{Executor, PauseSwitch};
-use warden_policy::Payments;
-use warden_rail_paypal::PaypalRail;
-use warden_rail_sol::SolRail;
-use warden_store::PgStore;
 
 use crate::config::Config;
 use crate::contacts::Desk;
@@ -90,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
     };
     let mut requestable = rail.assets();
     if paypal.is_some() {
-        requestable.push(warden_rail_paypal::usd());
+        requestable.push(agile_money_rail_paypal::usd());
     }
     let clock = Arc::new(SystemClock);
     let ids: Arc<dyn IdGen> = Arc::new(UuidV7);
@@ -248,7 +248,7 @@ async fn main() -> anyhow::Result<()> {
         ?cluster,
         wallet = %rail.address(),
         policy_version = policy.version,
-        "Tilly bot starting"
+        "Agile Money bot starting"
     );
     let app = Arc::new(App {
         owner,

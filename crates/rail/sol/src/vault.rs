@@ -9,6 +9,7 @@ use solana_sdk::pubkey::Pubkey;
 
 pub const SEED: &[u8] = b"vault";
 pub const MAX_RECIPIENTS: usize = 16;
+// The tag predates the rename; accounts on chain carry it.
 const DISCRIMINATOR: &[u8; 8] = b"tillyvlt";
 
 /// `[rail.sol.vault]`: where the vault lives. Both are public keys.

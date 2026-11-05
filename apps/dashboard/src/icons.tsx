@@ -1,4 +1,4 @@
-// Tilly's own glyphs: a 24 grid, 1.6 stroke, round caps, drawn to sit together.
+// Agile Money's own glyphs: a 24 grid, 1.6 stroke, round caps, drawn to sit together.
 // Colour comes from `currentColor`, size from the `.icon` class.
 
 const PATHS = {

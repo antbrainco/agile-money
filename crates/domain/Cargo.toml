@@ -1,6 +1,6 @@
 [package]
-name = "warden-domain"
-description = "Warden core types, events and state machines. No I/O."
+name = "agile-money-domain"
+description = "Agile Money core types, events and state machines. No I/O."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

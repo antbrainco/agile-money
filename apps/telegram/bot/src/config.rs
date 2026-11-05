@@ -1,17 +1,17 @@
-//! Layered config: `warden.toml`, then `WARDEN_*` env vars (`__` nests), then
+//! Layered config: `agile-money.toml`, then `AGILE_MONEY_*` env vars (`__` nests), then
 //! the conventional `DATABASE_URL`, `TELOXIDE_TOKEN`, `TUNNEL_URL` and
 //! `TELEGRAM_WEBHOOK_SECRET`, `DASHBOARD_TOKEN` and `TOTP_SECRET`.
 
+use agile_money_agent_core::LlmSettings;
+use agile_money_agent_core::tools::parse_major;
+use agile_money_domain::{Amount, Asset, SolAddress};
+use agile_money_executor::ExecConfig;
+use agile_money_rail_sol::Cluster;
+use agile_money_store::DbConfig;
 use figment::Figment;
 use figment::providers::{Env, Format, Toml};
 use secrecy::SecretString;
 use serde::Deserialize;
-use warden_agent_core::LlmSettings;
-use warden_agent_core::tools::parse_major;
-use warden_domain::{Amount, Asset, SolAddress};
-use warden_executor::ExecConfig;
-use warden_rail_sol::Cluster;
-use warden_store::DbConfig;
 
 use crate::webhook::WebhookConfig;
 
@@ -47,7 +47,7 @@ pub enum Network {
 #[derive(Debug, Deserialize)]
 pub struct TelegramConfig {
     pub token: SecretString,
-    /// The only chat Tilly answers. Send /start once to learn yours.
+    /// The only chat Agile Money answers. Send /start once to learn yours.
     pub owner_chat_id: i64,
     /// Receive updates on a public HTTPS URL instead of long polling.
     pub webhook: Option<WebhookConfig>,
@@ -64,15 +64,15 @@ pub struct AgentConfig {
 }
 
 fn step_limit() -> u32 {
-    warden_domain::STEP_LIMIT
+    agile_money_domain::STEP_LIMIT
 }
 
 #[derive(Debug, Deserialize)]
 pub struct RailConfig {
     pub sol: SolSection,
-    /// On when `WARDEN_RAIL__PAYPAL__CLIENT_ID` and `__CLIENT_SECRET` are set:
+    /// On when `AGILE_MONEY_RAIL__PAYPAL__CLIENT_ID` and `__CLIENT_SECRET` are set:
     /// payment requests in USD by PayPal checkout.
-    pub paypal: Option<warden_rail_paypal::PaypalConfig>,
+    pub paypal: Option<agile_money_rail_paypal::PaypalConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,7 +82,7 @@ pub struct SolSection {
     /// The USDC mint. Defaults to Circle's mint for the configured network.
     pub usdc_mint: Option<SolAddress>,
     #[serde(flatten)]
-    pub conn: warden_rail_sol::SolConfig,
+    pub conn: agile_money_rail_sol::SolConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -145,7 +145,7 @@ impl Major {
     }
 }
 
-/// An asset Tilly may pay in, with its limits resolved to minor units.
+/// An asset Agile Money may pay in, with its limits resolved to minor units.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AssetPolicy {
     pub asset: Asset,
@@ -180,8 +180,8 @@ impl Config {
         // A missing .env is fine; real env vars take precedence over it.
         let _ = dotenvy::dotenv();
         let config: Self = Figment::new()
-            .merge(Toml::file("warden.toml"))
-            .merge(Env::prefixed("WARDEN_").split("__"))
+            .merge(Toml::file("agile-money.toml"))
+            .merge(Env::prefixed("AGILE_MONEY_").split("__"))
             .merge(
                 Env::raw()
                     .only(&["DATABASE_URL"])
@@ -236,10 +236,13 @@ impl Config {
 
     /// SOL, then USDC when `[policy.usdc]` is set.
     pub fn assets(&self) -> anyhow::Result<Vec<AssetPolicy>> {
-        let mut assets = vec![AssetPolicy::new(warden_rail_sol::sol(), &self.policy.sol)?];
+        let mut assets = vec![AssetPolicy::new(
+            agile_money_rail_sol::sol(),
+            &self.policy.sol,
+        )?];
         if let Some(limits) = &self.policy.usdc {
             assets.push(AssetPolicy::new(
-                warden_rail_sol::usdc(self.usdc_mint()?),
+                agile_money_rail_sol::usdc(self.usdc_mint()?),
                 limits,
             )?);
         }
@@ -251,8 +254,8 @@ impl Config {
             return Ok(mint);
         }
         let default = match self.network {
-            Network::Devnet => warden_rail_sol::USDC_DEVNET_MINT,
-            Network::Mainnet => warden_rail_sol::USDC_MAINNET_MINT,
+            Network::Devnet => agile_money_rail_sol::USDC_DEVNET_MINT,
+            Network::Mainnet => agile_money_rail_sol::USDC_MAINNET_MINT,
             Network::Testnet => anyhow::bail!("USDC on testnet needs rail.sol.usdc_mint"),
         };
         default
@@ -292,7 +295,7 @@ mod tests {
 
     #[test]
     fn amounts_parse_exactly_and_refuse_floats() {
-        let sol = warden_rail_sol::sol();
+        let sol = agile_money_rail_sol::sol();
         assert_eq!(amount("\"0.05\"", &sol).unwrap().minor, 50_000_000);
         assert_eq!(amount("2", &sol).unwrap().minor, 2_000_000_000);
         assert!(amount("0.05", &sol).is_none(), "float");
@@ -300,7 +303,7 @@ mod tests {
             amount("\"0.0000000001\"", &sol).is_none(),
             "below a lamport"
         );
-        let usdc = warden_rail_sol::usdc(SolAddress::from_bytes([1; 32]));
+        let usdc = agile_money_rail_sol::usdc(SolAddress::from_bytes([1; 32]));
         assert_eq!(amount("\"12.5\"", &usdc).unwrap().minor, 12_500_000);
         assert!(
             amount("\"0.0000001\"", &usdc).is_none(),
@@ -309,21 +312,21 @@ mod tests {
     }
 
     #[test]
-    fn warden_toml_policy_resolves_both_assets() {
+    fn agile_money_toml_policy_resolves_both_assets() {
         #[derive(Deserialize)]
         struct File {
             policy: PolicyConfig,
         }
         let file: File = Figment::from(Toml::file(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../../warden.toml"
+            "/../../../agile-money.toml"
         )))
         .extract()
         .unwrap();
-        let sol = AssetPolicy::new(warden_rail_sol::sol(), &file.policy.sol).unwrap();
+        let sol = AssetPolicy::new(agile_money_rail_sol::sol(), &file.policy.sol).unwrap();
         assert_eq!(sol.approval_above.to_string(), "0.05 SOL");
         let usdc = AssetPolicy::new(
-            warden_rail_sol::usdc(warden_rail_sol::USDC_DEVNET_MINT.parse().unwrap()),
+            agile_money_rail_sol::usdc(agile_money_rail_sol::USDC_DEVNET_MINT.parse().unwrap()),
             file.policy.usdc.as_ref().unwrap(),
         )
         .unwrap();
@@ -364,7 +367,7 @@ mod tests {
     }
 
     #[test]
-    fn warden_toml_webhook_resolves_to_the_tunnel() {
+    fn agile_money_toml_webhook_resolves_to_the_tunnel() {
         #[derive(Deserialize)]
         struct File {
             telegram: Section,
@@ -375,7 +378,7 @@ mod tests {
         }
         let file: File = Figment::from(Toml::file(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../../warden.toml"
+            "/../../../agile-money.toml"
         )))
         .extract()
         .unwrap();

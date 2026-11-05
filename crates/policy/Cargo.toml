@@ -1,5 +1,5 @@
 [package]
-name = "warden-policy"
+name = "agile-money-policy"
 description = "Policy engine: ordered rules decide Allow, RequireApproval or Deny."
 version.workspace = true
 edition.workspace = true
@@ -13,7 +13,7 @@ jiff.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 uuid.workspace = true
-warden-domain.workspace = true
+agile-money-domain.workspace = true
 
 [lints]
 workspace = true
@@ -21,4 +21,4 @@ workspace = true
 [dev-dependencies]
 proptest.workspace = true
 tokio.workspace = true
-warden-domain = { workspace = true, features = ["mock"] }
+agile-money-domain = { workspace = true, features = ["mock"] }

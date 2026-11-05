@@ -1,4 +1,4 @@
-//! Policy data: versioned, human-edited rule lists (rule 9). Evaluation lives in `warden-policy`.
+//! Policy data: versioned, human-edited rule lists (rule 9). Evaluation lives in `agile-money-policy`.
 
 use jiff::{SignedDuration, Timestamp, civil::Time};
 use serde::{Deserialize, Serialize};

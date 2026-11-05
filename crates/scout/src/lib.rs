@@ -1,7 +1,7 @@
 //! Web research for the agent: Tavily search via Bifrost. Every result is `Untrusted` (rule 14).
 
+use agile_money_domain::Untrusted;
 use serde::{Deserialize, Serialize};
-use warden_domain::Untrusted;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

@@ -3,6 +3,12 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
+use agile_money_domain::ports::IdGen;
+use agile_money_domain::{
+    Address, Amount, Asset, Client, IdempotencyKey, Intent, IntentId, IntentState, Invoice,
+    InvoiceId, InvoiceState, LineItem, PaymentRequest, Provenance, RailRef, Recipient, SolAddress,
+};
+use agile_money_policy::Payments;
 use async_trait::async_trait;
 use jiff::SignedDuration;
 use rust_decimal::Decimal;
@@ -10,12 +16,6 @@ use rust_decimal::prelude::ToPrimitive;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
-use warden_domain::ports::IdGen;
-use warden_domain::{
-    Address, Amount, Asset, Client, IdempotencyKey, Intent, IntentId, IntentState, Invoice,
-    InvoiceId, InvoiceState, LineItem, PaymentRequest, Provenance, RailRef, Recipient, SolAddress,
-};
-use warden_policy::Payments;
 
 use crate::{Error, Tool, ToolCtx, ToolOutput};
 
@@ -374,10 +374,10 @@ impl Tool for PaymentStatus {
 mod tests {
     use std::sync::Mutex;
 
+    use agile_money_domain::ports::SequentialIds;
+    use agile_money_domain::{AgentId, RailId, RunId, SolAddress};
     use jiff::Timestamp;
     use uuid::Uuid;
-    use warden_domain::ports::SequentialIds;
-    use warden_domain::{AgentId, RailId, RunId, SolAddress};
 
     use super::*;
 

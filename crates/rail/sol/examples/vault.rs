@@ -3,27 +3,27 @@
 //! everything but `fund`; it lives in a keypair file the bot never reads.
 //!
 //! ```bash
-//! set -a; . ./.env; set +a   # fund needs WARDEN_RAIL__SOL__KEYPAIR
+//! set -a; . ./.env; set +a   # fund needs AGILE_MONEY_RAIL__SOL__KEYPAIR
 //! export VAULT_PROGRAM=<program id> VAULT_OWNER=~/.config/solana/owner.json
-//! cargo run -p warden-rail-sol --example vault -- show
-//! cargo run -p warden-rail-sol --example vault -- open --agent <bot wallet> --per-tx 0.5 --per-day 1 --to <addr> ...
-//! cargo run -p warden-rail-sol --example vault -- limits --agent <bot wallet> --per-tx 0.5 --per-day 1 --to <addr> ...
-//! cargo run -p warden-rail-sol --example vault -- fund-owner 1   # fees and the deploy
-//! cargo run -p warden-rail-sol --example vault -- fund 1
-//! cargo run -p warden-rail-sol --example vault -- withdraw 0.5
+//! cargo run -p agile-money-rail-sol --example vault -- show
+//! cargo run -p agile-money-rail-sol --example vault -- open --agent <bot wallet> --per-tx 0.5 --per-day 1 --to <addr> ...
+//! cargo run -p agile-money-rail-sol --example vault -- limits --agent <bot wallet> --per-tx 0.5 --per-day 1 --to <addr> ...
+//! cargo run -p agile-money-rail-sol --example vault -- fund-owner 1   # fees and the deploy
+//! cargo run -p agile-money-rail-sol --example vault -- fund 1
+//! cargo run -p agile-money-rail-sol --example vault -- withdraw 0.5
 //! ```
 //!
 //! Prints only public keys, amounts and signatures.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use agile_money_rail_sol::vault::{Limits, State, Vault};
 use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::instruction::Instruction;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, Signer, read_keypair_file};
 use solana_sdk::transaction::Transaction;
-use warden_rail_sol::vault::{Limits, State, Vault};
 
 const LAMPORTS: u64 = 1_000_000_000;
 
@@ -123,8 +123,8 @@ async fn show(rpc: &RpcClient, vault: &Vault) {
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let rpc = RpcClient::new_with_commitment(
-        std::env::var("WARDEN_RAIL__SOL__RPC_URL")
-            .unwrap_or_else(|_| warden_rail_sol::DEVNET_URL.into()),
+        std::env::var("AGILE_MONEY_RAIL__SOL__RPC_URL")
+            .unwrap_or_else(|_| agile_money_rail_sol::DEVNET_URL.into()),
         CommitmentConfig::confirmed(),
     );
     let program: Pubkey = env("VAULT_PROGRAM").parse().expect("VAULT_PROGRAM pubkey");
@@ -140,7 +140,7 @@ async fn main() {
         }
         Some(cmd @ ("fund" | "fund-owner")) => {
             let amount = lamports(args.get(1).expect("amount in SOL"));
-            let secret = env("WARDEN_RAIL__SOL__KEYPAIR");
+            let secret = env("AGILE_MONEY_RAIL__SOL__KEYPAIR");
             let secret = secret.trim();
             let wallet = if secret.starts_with('[') {
                 let bytes: Vec<u8> = serde_json::from_str(secret).expect("keypair JSON");

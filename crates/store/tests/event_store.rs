@@ -2,15 +2,15 @@
 
 #![allow(clippy::unwrap_used)] // helpers outside #[test] fns, which clippy.toml does not cover
 
-use jiff::{SignedDuration, Timestamp};
-use sqlx::PgPool;
-use uuid::Uuid;
-use warden_domain::ports::{EventStore, Outbox, OutboxCommand, ReadModel, StoreError};
-use warden_domain::{
+use agile_money_domain::ports::{EventStore, Outbox, OutboxCommand, ReadModel, StoreError};
+use agile_money_domain::{
     Address, AgentId, Amount, Asset, Decision, Event, Intent, IntentId, PolicyId, Proposed,
     Provenance, RailId, RailRef, Recipient, RunId, SolAddress, SolSignature, StreamId,
 };
-use warden_store::PgStore;
+use agile_money_store::PgStore;
+use jiff::{SignedDuration, Timestamp};
+use sqlx::PgPool;
+use uuid::Uuid;
 
 fn intent() -> IntentId {
     IntentId::new(Uuid::from_u128(1))
@@ -90,7 +90,7 @@ async fn outbox_len(pool: &PgPool) -> i64 {
         .unwrap()
 }
 
-#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+#[sqlx::test(migrator = "agile_money_store::MIGRATOR")]
 async fn append_then_load_round_trips(pool: PgPool) {
     let store = PgStore::from_pool(pool.clone());
     let stream = seeded(&store).await;
@@ -119,7 +119,7 @@ async fn append_then_load_round_trips(pool: PgPool) {
     assert_eq!(serde_json::from_value::<OutboxCommand>(body).unwrap(), cmd);
 }
 
-#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+#[sqlx::test(migrator = "agile_money_store::MIGRATOR")]
 async fn stale_expected_len_conflicts_and_writes_nothing(pool: PgPool) {
     let store = PgStore::from_pool(pool.clone());
     let stream = seeded(&store).await;
@@ -139,7 +139,7 @@ async fn stale_expected_len_conflicts_and_writes_nothing(pool: PgPool) {
     assert_eq!(outbox_len(&pool).await, 0);
 }
 
-#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+#[sqlx::test(migrator = "agile_money_store::MIGRATOR")]
 async fn concurrent_appends_at_same_position_conflict(pool: PgPool) {
     let store = PgStore::from_pool(pool);
     let stream = seeded(&store).await;
@@ -162,7 +162,7 @@ async fn concurrent_appends_at_same_position_conflict(pool: PgPool) {
     assert_eq!(store.load(&stream).await.unwrap().len(), 2);
 }
 
-#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+#[sqlx::test(migrator = "agile_money_store::MIGRATOR")]
 async fn unknown_stream_loads_empty(pool: PgPool) {
     let store = PgStore::from_pool(pool);
     assert!(
@@ -174,7 +174,7 @@ async fn unknown_stream_loads_empty(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+#[sqlx::test(migrator = "agile_money_store::MIGRATOR")]
 async fn reused_idempotency_key_is_a_duplicate(pool: PgPool) {
     let store = PgStore::from_pool(pool);
     seeded(&store).await;
@@ -196,7 +196,7 @@ async fn reused_idempotency_key_is_a_duplicate(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+#[sqlx::test(migrator = "agile_money_store::MIGRATOR")]
 async fn spend_counts_reserved_and_settled(pool: PgPool) {
     let store = PgStore::from_pool(pool);
     let stream = seeded(&store).await;
@@ -227,7 +227,7 @@ async fn spend_counts_reserved_and_settled(pool: PgPool) {
     assert_eq!((spend.settled.minor, spend.reserved.minor), (100, 0));
 }
 
-#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+#[sqlx::test(migrator = "agile_money_store::MIGRATOR")]
 async fn outbox_claims_are_exclusive_leases(pool: PgPool) {
     let store = PgStore::from_pool(pool);
     let stream = seeded(&store).await;
@@ -260,11 +260,11 @@ async fn outbox_claims_are_exclusive_leases(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+#[sqlx::test(migrator = "agile_money_store::MIGRATOR")]
 async fn approval_maps_back_to_its_intent(pool: PgPool) {
     let store = PgStore::from_pool(pool);
     let stream = seeded(&store).await;
-    let approval = warden_domain::ApprovalId::new(Uuid::from_u128(55));
+    let approval = agile_money_domain::ApprovalId::new(Uuid::from_u128(55));
     store
         .append(
             &stream,
@@ -293,25 +293,30 @@ async fn approval_maps_back_to_its_intent(pool: PgPool) {
     assert_eq!(store.awaiting_approval().await.unwrap(), [intent()]);
 }
 
-fn invoice(n: u128) -> (warden_domain::Invoice, warden_domain::PaymentRequest) {
+fn invoice(
+    n: u128,
+) -> (
+    agile_money_domain::Invoice,
+    agile_money_domain::PaymentRequest,
+) {
     let total = Amount::new(5_000_000_000, sol());
-    let invoice = warden_domain::Invoice {
-        id: warden_domain::InvoiceId::new(Uuid::from_u128(n)),
-        to: warden_domain::Client {
+    let invoice = agile_money_domain::Invoice {
+        id: agile_money_domain::InvoiceId::new(Uuid::from_u128(n)),
+        to: agile_money_domain::Client {
             name: "Acme".into(),
             email: None,
         },
-        lines: vec![warden_domain::LineItem {
+        lines: vec![agile_money_domain::LineItem {
             description: "logo".into(),
             quantity: 1,
             unit_price: total.clone(),
         }],
         total,
         rail: RailId::Sol,
-        state: warden_domain::InvoiceState::Sent,
+        state: agile_money_domain::InvoiceState::Sent,
         due: None,
     };
-    let request = warden_domain::PaymentRequest {
+    let request = agile_money_domain::PaymentRequest {
         url: "solana:x".into(),
         qr_png: None,
         rail_ref: RailRef::Sol {
@@ -322,7 +327,7 @@ fn invoice(n: u128) -> (warden_domain::Invoice, warden_domain::PaymentRequest) {
     (invoice, request)
 }
 
-#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+#[sqlx::test(migrator = "agile_money_store::MIGRATOR")]
 async fn paid_invoices_leave_the_open_list(pool: PgPool) {
     let store = PgStore::from_pool(pool);
     let since = Timestamp::now() - SignedDuration::from_hours(1);

@@ -16,16 +16,16 @@ jobs:
       postgres:
         image: postgres:17
         env:
-          POSTGRES_USER: warden
-          POSTGRES_PASSWORD: warden
-          POSTGRES_DB: warden
+          POSTGRES_USER: agile_money
+          POSTGRES_PASSWORD: agile_money
+          POSTGRES_DB: agile_money
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U warden"
+          --health-cmd "pg_isready -U agile_money"
           --health-interval 2s
           --health-retries 15
     env:
-      DATABASE_URL: postgres://warden:warden@localhost:5432/warden
+      DATABASE_URL: postgres://agile_money:agile_money@localhost:5432/agile_money
       # Query macros build from the committed .sqlx/ cache, so a stale cache fails CI.
       SQLX_OFFLINE: "true"
     steps:

@@ -5,18 +5,18 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+use agile_money_agent_core::tools::{ContactBook, ListContacts, PaymentStatus, ProposePayment};
+use agile_money_agent_core::{
+    Agent, DynTool, Error, Llm, Message, Reply, RunObserver, ToolCall, ToolSpec,
+};
+use agile_money_domain::memory::MemStore;
+use agile_money_domain::ports::{FixedClock, OutboxCommand, SequentialIds};
+use agile_money_domain::*;
+use agile_money_policy::{Approver, Payments, ProposeOutcome};
 use async_trait::async_trait;
 use jiff::Timestamp;
 use serde_json::json;
 use uuid::Uuid;
-use warden_agent_core::tools::{ContactBook, ListContacts, PaymentStatus, ProposePayment};
-use warden_agent_core::{
-    Agent, DynTool, Error, Llm, Message, Reply, RunObserver, ToolCall, ToolSpec,
-};
-use warden_domain::memory::MemStore;
-use warden_domain::ports::{FixedClock, OutboxCommand, SequentialIds};
-use warden_domain::*;
-use warden_policy::{Approver, Payments, ProposeOutcome};
 
 fn sol() -> Asset {
     Asset {
@@ -64,7 +64,7 @@ impl Approver for NoApprover {
         &self,
         _: &Approval,
         _: &Intent<Proposed>,
-    ) -> Result<(), warden_policy::Error> {
+    ) -> Result<(), agile_money_policy::Error> {
         Ok(())
     }
 }

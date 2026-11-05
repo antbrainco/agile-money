@@ -6,6 +6,11 @@
 
 use std::time::Duration;
 
+use agile_money_domain::ports::{Rail, RailError};
+use agile_money_domain::{
+    Address, Amount, Approved, Asset, IdempotencyKey, Intent, Invoice, PaymentRequest,
+    PaypalOrderId, RailId, RailRef, Settlement, Submission,
+};
 use async_trait::async_trait;
 use jiff::Timestamp;
 use reqwest::header::CONTENT_TYPE;
@@ -17,11 +22,6 @@ use serde_json::{Value, json};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 use url::Url;
-use warden_domain::ports::{Rail, RailError};
-use warden_domain::{
-    Address, Amount, Approved, Asset, IdempotencyKey, Intent, Invoice, PaymentRequest,
-    PaypalOrderId, RailId, RailRef, Settlement, Submission,
-};
 
 pub const RAIL_ID: RailId = RailId::Paypal;
 
@@ -54,8 +54,8 @@ pub enum Error {
     Config(String),
 }
 
-/// `[rail.paypal]` plus `WARDEN_RAIL__PAYPAL__CLIENT_ID` and
-/// `WARDEN_RAIL__PAYPAL__CLIENT_SECRET`, from a REST app at developer.paypal.com.
+/// `[rail.paypal]` plus `AGILE_MONEY_RAIL__PAYPAL__CLIENT_ID` and
+/// `AGILE_MONEY_RAIL__PAYPAL__CLIENT_SECRET`, from a REST app at developer.paypal.com.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PaypalConfig {
     pub client_id: SecretString,
@@ -393,7 +393,7 @@ impl Rail for PaypalRail {
         }
         let request_id = key(format!("invoice:{}", inv.id))?;
         let mut experience = json!({
-            "brand_name": "Tilly",
+            "brand_name": "Agile Money",
             "user_action": "PAY_NOW",
             "shipping_preference": "NO_SHIPPING",
         });
@@ -458,7 +458,7 @@ impl Rail for PaypalRail {
         let note = intent
             .memo
             .clone()
-            .unwrap_or_else(|| format!("Payment from Tilly ({})", intent.id));
+            .unwrap_or_else(|| format!("Payment from Agile Money ({})", intent.id));
         let key = intent.idempotency_key.as_str();
         let body = json!({
             "sender_batch_header": {
@@ -639,11 +639,11 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
-    use uuid::Uuid;
-    use warden_domain::{
+    use agile_money_domain::{
         AgentId, Client, Decision, IntentId, InvoiceId, InvoiceState, LineItem, Provenance,
         Recipient, RunId,
     };
+    use uuid::Uuid;
     use wiremock::matchers::{body_partial_json, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -669,7 +669,7 @@ mod tests {
             client_secret: "secret".into(),
             live: false,
             base_url: Some(server.uri().parse().unwrap()),
-            return_url: Some("https://tilly.example/paid".parse().unwrap()),
+            return_url: Some("https://agile-money.example/paid".parse().unwrap()),
             cancel_url: None,
         })
         .unwrap()
@@ -754,7 +754,7 @@ mod tests {
                     "amount": { "currency_code": "USD", "value": "12.50" },
                 }],
                 "payment_source": { "paypal": { "experience_context": {
-                    "return_url": "https://tilly.example/paid",
+                    "return_url": "https://agile-money.example/paid",
                     "user_action": "PAY_NOW",
                 }}},
             })))

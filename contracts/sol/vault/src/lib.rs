@@ -1,4 +1,4 @@
-//! Tilly's vault: holds the agent's SOL and pays out only within limits the
+//! Agile Money's vault: holds the agent's SOL and pays out only within limits the
 //! owner set. The bot's hot key is the vault's `agent`: it can ask for a
 //! payment, and this program refuses one that is over the per-payment cap,
 //! over the daily cap, or to an address not on the owner's list. Changing the
@@ -40,6 +40,7 @@ pub const DAY: i64 = 24 * 60 * 60;
 /// 11111111111111111111111111111111
 const SYSTEM_PROGRAM: Pubkey = Pubkey::new_from_array([0; 32]);
 
+// The tag predates the rename; accounts on chain carry it.
 const DISCRIMINATOR: [u8; 8] = *b"tillyvlt";
 /// discriminator, owner, agent, max_per_tx, max_per_day, window_start, spent,
 /// bump, count, recipients.

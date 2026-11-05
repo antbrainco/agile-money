@@ -67,8 +67,8 @@ impl Linking {
     ) -> Result<String, ProfileError> {
         pubkey(address)?;
         let what = match purpose {
-            Purpose::SignIn => "Sign in to your Tilly dashboard.",
-            Purpose::Link => "Link this wallet to your Tilly dashboard, so it can sign in.",
+            Purpose::SignIn => "Sign in to your Agile Money dashboard.",
+            Purpose::Link => "Link this wallet to your Agile Money dashboard, so it can sign in.",
         };
         let message = format!(
             "{host} wants you to sign in with your Solana account:\n{address}\n\n{what} \
@@ -183,9 +183,9 @@ mod tests {
         let wallet = Keypair::new();
         let address = wallet.pubkey().to_string();
         let message = links
-            .challenge(Purpose::SignIn, &address, "tilly.example", now())
+            .challenge(Purpose::SignIn, &address, "agile-money.example", now())
             .unwrap();
-        assert!(message.starts_with("tilly.example wants you to sign in"));
+        assert!(message.starts_with("agile-money.example wants you to sign in"));
         let signature = wallet.sign_message(message.as_bytes()).to_string();
         assert_eq!(
             links.verify(Purpose::SignIn, &address, &signature, now()),

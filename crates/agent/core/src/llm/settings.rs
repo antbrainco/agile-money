@@ -76,7 +76,7 @@ pub struct GatewaySettings {
     #[serde(default = "default_gateway")]
     pub gateway_id: String,
     /// For an authenticated gateway, sent as `cf-aig-authorization`. From env:
-    /// `WARDEN_AGENT__GATEWAY__TOKEN` or `CF_AIG_TOKEN`.
+    /// `AGILE_MONEY_AGENT__GATEWAY__TOKEN` or `CF_AIG_TOKEN`.
     pub token: Option<SecretString>,
 }
 
@@ -343,7 +343,7 @@ impl LlmSettings {
             None if self.gateway.is_some() || self.provider()? == Provider::Compatible => {}
             None => {
                 return Err(Error::Invalid(format!(
-                    "no API key: set {} or WARDEN_AGENT__API_KEY",
+                    "no API key: set {} or AGILE_MONEY_AGENT__API_KEY",
                     self.provider()?.key_var().unwrap_or("agent.api_key")
                 )));
             }

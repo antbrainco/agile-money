@@ -4,7 +4,7 @@
 //!
 //! ```bash
 //! set -a; . ./.env; set +a
-//! cargo run -p warden-rail-sol --example pay_request -- 'solana:...'
+//! cargo run -p agile-money-rail-sol --example pay_request -- 'solana:...'
 //! ```
 //!
 //! Prints only public keys and signatures.
@@ -83,7 +83,7 @@ async fn main() {
     let decimals = u32::from(rpc.get_token_supply(&mint).await.unwrap().decimals);
     let units = minor(&amount, decimals);
 
-    let funder = keypair(&std::env::var("WARDEN_RAIL__SOL__KEYPAIR").expect("bot keypair"));
+    let funder = keypair(&std::env::var("AGILE_MONEY_RAIL__SOL__KEYPAIR").expect("bot keypair"));
     let payer = Keypair::new();
     let token = spl_token_interface::ID;
     let ata = |owner: &Pubkey| get_associated_token_address_with_program_id(owner, &mint, &token);

@@ -1,4 +1,4 @@
-# Tilly's Telegram bot. Build: docker build -t tilly-bot .
+# Agile Money's Telegram bot. Build: docker build -t agile-money-bot .
 # Secrets come from the environment at run time; none are baked into the image.
 
 FROM rust:1-slim-bookworm AS build
@@ -15,16 +15,16 @@ COPY . .
 ENV SQLX_OFFLINE=true
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked -p warden-telegram-bot \
-    && cp target/release/warden-telegram-bot /usr/local/bin/
+    cargo build --release --locked -p agile-money-telegram-bot \
+    && cp target/release/agile-money-telegram-bot /usr/local/bin/
 
 FROM debian:bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libssl3 \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=build /usr/local/bin/warden-telegram-bot /usr/local/bin/
+COPY --from=build /usr/local/bin/agile-money-telegram-bot /usr/local/bin/
 WORKDIR /app
-# Non-secret config; WARDEN_* env vars override it.
-COPY warden.toml ./
+# Non-secret config; AGILE_MONEY_* env vars override it.
+COPY agile-money.toml ./
 USER 10001
-CMD ["warden-telegram-bot"]
+CMD ["agile-money-telegram-bot"]

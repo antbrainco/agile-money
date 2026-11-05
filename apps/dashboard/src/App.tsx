@@ -680,7 +680,7 @@ function Requests() {
   const { data, error } = usePoll(api.invoices, POLL_MS * 2);
   return (
     <section>
-      <Head title="Requests">Links Tilly made for clients to pay you.</Head>
+      <Head title="Requests">Links Agile Money made for clients to pay you.</Head>
       <Status
         error={error}
         loading={!data}
@@ -852,16 +852,16 @@ function LimitsPage({ codes }: { codes: boolean }) {
 }
 
 const SOURCE_LABEL = {
-  config: "warden.toml",
+  config: "agile-money.toml",
   dashboard: "Dashboard",
   contacts: "Contacts changed",
 } as const;
 
 const CONTACT_FROM: Record<ContactRow["source"], string> = {
-  config: "warden.toml",
+  config: "agile-money.toml",
   telegram: "Telegram",
   dashboard: "Dashboard",
-  agent: "Suggested by Tilly",
+  agent: "Suggested by Agile Money",
 };
 
 function Contacts({ onSetUp }: { onSetUp: () => void }) {
@@ -896,7 +896,7 @@ function Contacts({ onSetUp }: { onSetUp: () => void }) {
   const change = async (row: ContactRow, action: "cancel" | "remove") => {
     const question =
       action === "remove"
-        ? `Remove ${row.label}? Tilly won't be able to pay them until you add them again.`
+        ? `Remove ${row.label}? Agile Money won't be able to pay them until you add them again.`
         : `Cancel ${row.label}?`;
     if (!confirm(question)) return;
     try {
@@ -910,7 +910,7 @@ function Contacts({ onSetUp }: { onSetUp: () => void }) {
   return (
     <section>
       <Head title="Contacts">
-        The only people Tilly can pay. A new or changed address waits{" "}
+        The only people Agile Money can pay. A new or changed address waits{" "}
         {data?.cooling_off ?? "a while"} before it can be paid, and the first payment to anyone
         always asks you. Removing is instant.
       </Head>
@@ -960,7 +960,7 @@ function Contacts({ onSetUp }: { onSetUp: () => void }) {
             </button>
           }
         >
-          Adding contacts needs authenticator codes. Until then they come from warden.toml only.
+          Adding contacts needs authenticator codes. Until then they come from agile-money.toml only.
         </Banner>
       ) : (
         <form className="card form contact-form" onSubmit={add}>
@@ -1080,7 +1080,7 @@ function Security({
   return (
     <section>
       <Head title="Security">
-        A code from your authenticator app guards anything that loosens what Tilly may pay: new
+        A code from your authenticator app guards anything that loosens what Agile Money may pay: new
         contacts, higher limits and resuming. Tightening never needs one.
       </Head>
       {done && <Banner>Codes are on. Telegram has been told.</Banner>}
@@ -1238,7 +1238,7 @@ function ProfilePage({ onSignOut, onSetUp }: { onSignOut: () => void; onSetUp: (
               )}
             </div>
             <p className="hint">
-              Approvals and alerts go to the chat set in warden.toml. Linking confirms this
+              Approvals and alerts go to the chat set in agile-money.toml. Linking confirms this
               account is that chat; other chats can't link.
             </p>
             <button className="wide" onClick={openTelegram}>

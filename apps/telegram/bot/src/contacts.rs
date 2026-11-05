@@ -8,16 +8,16 @@
 
 use std::sync::Arc;
 
+use agile_money_agent_core::tools::{ContactBook, ContactDesk};
+use agile_money_domain::ports::ReadModel;
+use agile_money_domain::{Address, AgentId, Policy, Recipient, Rule, SolAddress, UserId};
+use agile_money_policy::fingerprint;
+use agile_money_store::{Contact, ContactSource, ContactState, PgStore, PolicySource};
 use async_trait::async_trait;
 use jiff::{SignedDuration, Timestamp};
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 use uuid::Uuid;
-use warden_agent_core::tools::{ContactBook, ContactDesk};
-use warden_domain::ports::ReadModel;
-use warden_domain::{Address, AgentId, Policy, Recipient, Rule, SolAddress, UserId};
-use warden_policy::fingerprint;
-use warden_store::{Contact, ContactSource, ContactState, PgStore, PolicySource};
 
 use crate::config;
 use crate::security::Guard;
@@ -96,7 +96,7 @@ impl Desk {
             .map_err(|e| e.to_string())
     }
 
-    /// Makes `[[contacts]]` in warden.toml active at once (whoever edits the
+    /// Makes `[[contacts]]` in agile-money.toml active at once (whoever edits the
     /// file already holds the keys), then brings the policy in line.
     pub async fn seed(&self, contacts: &[config::Contact]) -> anyhow::Result<()> {
         let _lock = self.lock.lock().await;
@@ -600,7 +600,7 @@ pub fn human(d: SignedDuration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use warden_domain::PolicyId;
+    use agile_money_domain::PolicyId;
 
     #[test]
     fn look_alike_names_share_a_skeleton() {

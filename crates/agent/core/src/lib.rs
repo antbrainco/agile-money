@@ -9,6 +9,7 @@ pub mod tools;
 
 use std::pin::Pin;
 
+use agile_money_domain::{AgentId, Intent, Invoice, Proposed, RunId, ToolCallId, Untrusted};
 use async_trait::async_trait;
 use futures_util::Stream;
 use jiff::Timestamp;
@@ -16,7 +17,6 @@ use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use warden_domain::{AgentId, Intent, Invoice, Proposed, RunId, ToolCallId, Untrusted};
 
 pub use agent::{Agent, NoObserver, Paused, RunObserver, RunReport};
 pub use llm::{Detection, LlmClient, LlmSettings, Provider, Source};
@@ -37,9 +37,9 @@ pub enum Error {
     #[error("{0}")]
     Invalid(String),
     #[error(transparent)]
-    Domain(#[from] warden_domain::Error),
+    Domain(#[from] agile_money_domain::Error),
     #[error(transparent)]
-    Policy(#[from] warden_policy::Error),
+    Policy(#[from] agile_money_policy::Error),
     #[error("could not issue the request: {0}")]
     Billing(String),
 }

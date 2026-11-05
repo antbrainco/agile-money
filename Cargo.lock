@@ -68,6 +68,243 @@ dependencies = [
 ]
 
 [[package]]
+name = "agile-money-agent-core"
+version = "0.1.0"
+dependencies = [
+ "agile-money-domain",
+ "agile-money-policy",
+ "async-trait",
+ "futures-util",
+ "insta",
+ "jiff",
+ "reqwest 0.13.5",
+ "rust_decimal",
+ "schemars 1.2.3",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
+name = "agile-money-domain"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bs58",
+ "hex",
+ "jiff",
+ "mockall",
+ "proptest",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "thiserror 2.0.21",
+ "uuid",
+]
+
+[[package]]
+name = "agile-money-executor"
+version = "0.1.0"
+dependencies = [
+ "agile-money-domain",
+ "async-trait",
+ "jiff",
+ "serde",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "agile-money-policy"
+version = "0.1.0"
+dependencies = [
+ "agile-money-domain",
+ "async-trait",
+ "jiff",
+ "proptest",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "agile-money-rail-bch"
+version = "0.1.0"
+dependencies = [
+ "agile-money-domain",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "agile-money-rail-concordium"
+version = "0.1.0"
+dependencies = [
+ "agile-money-domain",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "agile-money-rail-near"
+version = "0.1.0"
+dependencies = [
+ "agile-money-domain",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "agile-money-rail-paypal"
+version = "0.1.0"
+dependencies = [
+ "agile-money-domain",
+ "async-trait",
+ "jiff",
+ "reqwest 0.13.5",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
+name = "agile-money-rail-sol"
+version = "0.1.0"
+dependencies = [
+ "agile-money-domain",
+ "async-trait",
+ "jiff",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "solana-commitment-config",
+ "solana-rpc-client",
+ "solana-sdk",
+ "solana-system-interface",
+ "solana-transaction-status-client-types",
+ "spl-associated-token-account-interface",
+ "spl-memo-interface",
+ "spl-token-interface",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "agile-money-scout"
+version = "0.1.0"
+dependencies = [
+ "agile-money-domain",
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "agile-money-shop"
+version = "0.1.0"
+dependencies = [
+ "agile-money-agent-core",
+ "agile-money-domain",
+ "agile-money-executor",
+ "agile-money-policy",
+ "agile-money-rail-bch",
+ "agile-money-rail-concordium",
+ "agile-money-rail-near",
+ "agile-money-rail-paypal",
+ "agile-money-rail-sol",
+ "agile-money-store",
+ "anyhow",
+ "axum",
+ "dotenvy",
+ "figment",
+ "serde",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "agile-money-store"
+version = "0.1.0"
+dependencies = [
+ "agile-money-domain",
+ "async-trait",
+ "dotenvy",
+ "jiff",
+ "jiff-sqlx",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "agile-money-telegram-bot"
+version = "0.1.0"
+dependencies = [
+ "agile-money-agent-core",
+ "agile-money-domain",
+ "agile-money-executor",
+ "agile-money-policy",
+ "agile-money-rail-bch",
+ "agile-money-rail-concordium",
+ "agile-money-rail-near",
+ "agile-money-rail-paypal",
+ "agile-money-rail-sol",
+ "agile-money-store",
+ "anyhow",
+ "async-trait",
+ "axum",
+ "bs58",
+ "dotenvy",
+ "figment",
+ "jiff",
+ "png",
+ "qrcode",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "solana-sdk",
+ "solana-signature",
+ "teloxide",
+ "tokio",
+ "totp-rs",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "agile-money-x402"
+version = "0.1.0"
+dependencies = [
+ "agile-money-domain",
+ "jiff",
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6574,243 +6811,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec4cdd0dd910afe868b7ef477227d8d538b46b3075031afee8a9f2acb0a2ed0b"
 dependencies = [
  "try-lock",
-]
-
-[[package]]
-name = "warden-agent-core"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "futures-util",
- "insta",
- "jiff",
- "reqwest 0.13.5",
- "rust_decimal",
- "schemars 1.2.3",
- "secrecy",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "url",
- "uuid",
- "warden-domain",
- "warden-policy",
- "wiremock",
-]
-
-[[package]]
-name = "warden-domain"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bs58",
- "hex",
- "jiff",
- "mockall",
- "proptest",
- "serde",
- "serde_json",
- "sha2 0.11.1",
- "thiserror 2.0.21",
- "uuid",
-]
-
-[[package]]
-name = "warden-executor"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "jiff",
- "serde",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "uuid",
- "warden-domain",
-]
-
-[[package]]
-name = "warden-policy"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "jiff",
- "proptest",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "uuid",
- "warden-domain",
-]
-
-[[package]]
-name = "warden-rail-bch"
-version = "0.1.0"
-dependencies = [
- "thiserror 2.0.21",
- "warden-domain",
-]
-
-[[package]]
-name = "warden-rail-concordium"
-version = "0.1.0"
-dependencies = [
- "thiserror 2.0.21",
- "warden-domain",
-]
-
-[[package]]
-name = "warden-rail-near"
-version = "0.1.0"
-dependencies = [
- "thiserror 2.0.21",
- "warden-domain",
-]
-
-[[package]]
-name = "warden-rail-paypal"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "jiff",
- "reqwest 0.13.5",
- "secrecy",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "url",
- "uuid",
- "warden-domain",
- "wiremock",
-]
-
-[[package]]
-name = "warden-rail-sol"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "jiff",
- "secrecy",
- "serde",
- "serde_json",
- "sha2 0.11.1",
- "solana-commitment-config",
- "solana-rpc-client",
- "solana-sdk",
- "solana-system-interface",
- "solana-transaction-status-client-types",
- "spl-associated-token-account-interface",
- "spl-memo-interface",
- "spl-token-interface",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "url",
- "uuid",
- "warden-domain",
-]
-
-[[package]]
-name = "warden-scout"
-version = "0.1.0"
-dependencies = [
- "serde",
- "thiserror 2.0.21",
- "warden-domain",
-]
-
-[[package]]
-name = "warden-shop"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "dotenvy",
- "figment",
- "serde",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "warden-agent-core",
- "warden-domain",
- "warden-executor",
- "warden-policy",
- "warden-rail-bch",
- "warden-rail-concordium",
- "warden-rail-near",
- "warden-rail-paypal",
- "warden-rail-sol",
- "warden-store",
-]
-
-[[package]]
-name = "warden-store"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "dotenvy",
- "jiff",
- "jiff-sqlx",
- "secrecy",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "uuid",
- "warden-domain",
-]
-
-[[package]]
-name = "warden-telegram-bot"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "bs58",
- "dotenvy",
- "figment",
- "jiff",
- "png",
- "qrcode",
- "secrecy",
- "serde",
- "serde_json",
- "solana-sdk",
- "solana-signature",
- "teloxide",
- "tokio",
- "totp-rs",
- "tracing",
- "tracing-subscriber",
- "url",
- "uuid",
- "warden-agent-core",
- "warden-domain",
- "warden-executor",
- "warden-policy",
- "warden-rail-bch",
- "warden-rail-concordium",
- "warden-rail-near",
- "warden-rail-paypal",
- "warden-rail-sol",
- "warden-store",
-]
-
-[[package]]
-name = "warden-x402"
-version = "0.1.0"
-dependencies = [
- "jiff",
- "serde",
- "thiserror 2.0.21",
- "warden-domain",
 ]
 
 [[package]]

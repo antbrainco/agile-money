@@ -1,5 +1,5 @@
 [package]
-name = "warden-x402"
+name = "agile-money-x402"
 description = "HTTP 402 payment challenges (server) and challenge-to-intent (client)."
 version.workspace = true
 edition.workspace = true
@@ -11,7 +11,7 @@ publish.workspace = true
 jiff.workspace = true
 serde.workspace = true
 thiserror.workspace = true
-warden-domain.workspace = true
+agile-money-domain.workspace = true
 
 [lints]
 workspace = true

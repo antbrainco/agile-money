@@ -8,6 +8,11 @@
 
 use std::str::FromStr;
 
+use agile_money_domain::ports::{Rail, RailError};
+use agile_money_domain::{
+    Address, Approved, Asset, Intent, Invoice, PaymentRequest, RailId, RailRef, Settlement,
+    SolAddress, SolSignature, Submission, TokenContract,
+};
 use async_trait::async_trait;
 use jiff::Timestamp;
 use secrecy::{ExposeSecret, SecretString};
@@ -26,11 +31,6 @@ use solana_transaction_status_client_types::{
     UiLoadedAddresses, UiTransactionEncoding, UiTransactionStatusMeta, UiTransactionTokenBalance,
 };
 use url::Url;
-use warden_domain::ports::{Rail, RailError};
-use warden_domain::{
-    Address, Approved, Asset, Intent, Invoice, PaymentRequest, RailId, RailRef, Settlement,
-    SolAddress, SolSignature, Submission, TokenContract,
-};
 
 pub mod vault;
 
@@ -75,7 +75,7 @@ pub enum Error {
     Config(String),
 }
 
-/// `[rail.sol]` plus `WARDEN_RAIL__SOL__KEYPAIR`.
+/// `[rail.sol]` plus `AGILE_MONEY_RAIL__SOL__KEYPAIR`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SolConfig {
     #[serde(default = "default_rpc_url")]
@@ -451,6 +451,7 @@ fn credited(
 
 /// Solana Pay reference for an idempotency key: any 32 bytes form a valid key.
 pub fn reference_for(idempotency_key: &str) -> Pubkey {
+    // The "tilly" prefix predates the rename; changing it would change references.
     let digest = Sha256::digest(format!("tilly:sol:reference:{idempotency_key}"));
     Pubkey::new_from_array(digest.into())
 }
@@ -588,7 +589,7 @@ impl Rail for SolRail {
             "solana:{}?amount={}{token}&reference={reference}&label={}&message={}",
             self.payer.pubkey(),
             inv.total.major(),
-            encode("Tilly"),
+            encode("Agile Money"),
             encode(&message(inv)),
         );
         Ok(PaymentRequest {
@@ -644,8 +645,8 @@ impl Rail for SolRail {
             )?,
         };
         let memo_text = match &intent.memo {
-            Some(memo) => format!("tilly {}: {memo}", intent.id),
-            None => format!("tilly {}", intent.id),
+            Some(memo) => format!("agile-money {}: {memo}", intent.id),
+            None => format!("agile-money {}", intent.id),
         };
         let memo = spl_memo_interface::instruction::build_memo(
             &spl_memo_interface::v3::id(),

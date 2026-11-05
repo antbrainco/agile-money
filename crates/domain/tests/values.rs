@@ -1,7 +1,7 @@
 //! Value types accept what their network accepts, reject the rest, and keep
 //! the bare-string JSON shape that stored events and intent hashes depend on.
 
-use warden_domain::{
+use agile_money_domain::{
     Address, AssetCode, BchTxid, CashAddr, ConcordiumAccount, EmailAddress, IdempotencyKey,
     IntentId, NearAccount, SolAddress, SolSignature, StreamId, TimeZoneName, ToolCallId,
 };
@@ -133,7 +133,7 @@ fn text_values() {
 
 #[test]
 fn idempotency_keys_come_from_tool_calls() {
-    let run = warden_domain::RunId::new(uuid::Uuid::nil());
+    let run = agile_money_domain::RunId::new(uuid::Uuid::nil());
     let call: ToolCallId = "call-1".parse().unwrap();
     let key = IdempotencyKey::for_tool_call(run, &call).unwrap();
     assert_eq!(key.as_str(), "00000000-0000-0000-0000-000000000000:call-1");

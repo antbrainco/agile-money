@@ -4,12 +4,12 @@
 
 use std::sync::Arc;
 
-use jiff::{SignedDuration, Timestamp};
-use warden_domain::ports::{Clock, EventStore, IdGen, OutboxCommand, ReadModel, StoreError};
-use warden_domain::{
+use agile_money_domain::ports::{Clock, EventStore, IdGen, OutboxCommand, ReadModel, StoreError};
+use agile_money_domain::{
     Approval, ApprovalId, ApprovalState, Channel, Event, EventEnvelope, Intent, IntentId,
     IntentState, Policy, PolicyId, Proposed as ProposedState, RailRef, Rule, StreamId, UserId,
 };
+use jiff::{SignedDuration, Timestamp};
 
 use crate::{Approver, Error, Outcome, PolicyEngine};
 
@@ -186,10 +186,10 @@ impl Payments {
                 vec![OutboxCommand::SubmitPayment { intent: id }],
                 Resolution::Granted,
             ),
-            Err(warden_domain::Error::ApprovalExpired) => {
+            Err(agile_money_domain::Error::ApprovalExpired) => {
                 (rejected(approval, None, true), vec![], Resolution::Expired)
             }
-            Err(warden_domain::Error::HashMismatch) => (
+            Err(agile_money_domain::Error::HashMismatch) => (
                 rejected(approval, None, false),
                 vec![],
                 Resolution::Superseded,
@@ -299,7 +299,7 @@ impl Payments {
                 Event::IntentProposed { hash, .. } => Some(hash.clone()),
                 _ => None,
             })
-            .ok_or(warden_domain::Error::MissingProposal(id))?;
+            .ok_or(agile_money_domain::Error::MissingProposal(id))?;
         let pending = Approval {
             id: approval,
             intent: id,
@@ -341,5 +341,5 @@ fn window_start(policy: Option<&Policy>, now: Timestamp) -> Result<Timestamp, Er
         })
         .unwrap_or(DEFAULT_WINDOW);
     now.checked_sub(window)
-        .map_err(|_| warden_domain::Error::Overflow.into())
+        .map_err(|_| agile_money_domain::Error::Overflow.into())
 }

@@ -299,8 +299,8 @@ impl StreamDecoder for Decoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agile_money_domain::Untrusted;
     use serde_json::Map;
-    use warden_domain::Untrusted;
 
     fn event(data: Value) -> SseEvent {
         SseEvent {

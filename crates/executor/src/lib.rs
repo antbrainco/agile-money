@@ -7,16 +7,16 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use async_trait::async_trait;
-use jiff::{SignedDuration, Timestamp};
-use serde::Deserialize;
-use warden_domain::ports::{
+use agile_money_domain::ports::{
     EventStore, Outbox, OutboxCommand, OutboxJob, Rail, RailError, StoreError,
 };
-use warden_domain::{
+use agile_money_domain::{
     Approved, Event, EventEnvelope, Intent, IntentId, IntentState, MAX_SUBMIT_ATTEMPTS, RailRef,
     Settlement, StreamId, Submission,
 };
+use async_trait::async_trait;
+use jiff::{SignedDuration, Timestamp};
+use serde::Deserialize;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -27,7 +27,7 @@ pub enum Error {
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error(transparent)]
-    Domain(#[from] warden_domain::Error),
+    Domain(#[from] agile_money_domain::Error),
 }
 
 /// Global kill switch (rule 6), checked before every submit.
@@ -83,7 +83,7 @@ pub trait Notifier: Send + Sync {
     async fn notify(&self, notice: Notice);
 }
 
-/// `[executor]` in `warden.toml`.
+/// `[executor]` in `agile-money.toml`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct ExecConfig {

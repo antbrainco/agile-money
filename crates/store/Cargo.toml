@@ -1,5 +1,5 @@
 [package]
-name = "warden-store"
+name = "agile-money-store"
 description = "Postgres event log, outbox and projections via sqlx."
 version.workspace = true
 edition.workspace = true
@@ -8,7 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [[bin]]
-name = "warden-migrate"
+name = "agile-money-migrate"
 path = "src/bin/migrate.rs"
 
 [dependencies]
@@ -24,7 +24,7 @@ sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-warden-domain.workspace = true
+agile-money-domain.workspace = true
 
 [dev-dependencies]
 jiff.workspace = true

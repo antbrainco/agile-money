@@ -1,9 +1,9 @@
 //! The owner's dashboard profile: wallets that may sign in, and the confirmed
 //! Telegram account.
 
+use agile_money_domain::AgentId;
+use agile_money_domain::ports::StoreError;
 use jiff::Timestamp;
-use warden_domain::AgentId;
-use warden_domain::ports::StoreError;
 
 use crate::PgStore;
 use crate::event_store::backend;

@@ -1,6 +1,6 @@
 [package]
-name = "warden-telegram-bot"
-description = "Tilly's Telegram bot: chat with the agent and answer approvals."
+name = "agile-money-telegram-bot"
+description = "Agile Money's Telegram bot: chat with the agent and answer approvals."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -28,16 +28,16 @@ solana-signature.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
-warden-agent-core.workspace = true
-warden-domain.workspace = true
-warden-executor.workspace = true
-warden-policy.workspace = true
-warden-store.workspace = true
-warden-rail-sol = { workspace = true, optional = true }
-warden-rail-paypal = { workspace = true, optional = true }
-warden-rail-near = { workspace = true, optional = true }
-warden-rail-bch = { workspace = true, optional = true }
-warden-rail-concordium = { workspace = true, optional = true }
+agile-money-agent-core.workspace = true
+agile-money-domain.workspace = true
+agile-money-executor.workspace = true
+agile-money-policy.workspace = true
+agile-money-store.workspace = true
+agile-money-rail-sol = { workspace = true, optional = true }
+agile-money-rail-paypal = { workspace = true, optional = true }
+agile-money-rail-near = { workspace = true, optional = true }
+agile-money-rail-bch = { workspace = true, optional = true }
+agile-money-rail-concordium = { workspace = true, optional = true }
 
 [dev-dependencies]
 solana-sdk.workspace = true
@@ -48,8 +48,8 @@ workspace = true
 [features]
 # Solana sends and receives; PayPal takes payment requests in USD. The bot needs sol.
 default = ["sol", "paypal"]
-sol = ["dep:warden-rail-sol"]
-paypal = ["dep:warden-rail-paypal"]
-near = ["dep:warden-rail-near"]
-bch = ["dep:warden-rail-bch"]
-concordium = ["dep:warden-rail-concordium"]
+sol = ["dep:agile-money-rail-sol"]
+paypal = ["dep:agile-money-rail-paypal"]
+near = ["dep:agile-money-rail-near"]
+bch = ["dep:agile-money-rail-bch"]
+concordium = ["dep:agile-money-rail-concordium"]

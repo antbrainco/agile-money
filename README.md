@@ -1,42 +1,88 @@
-# Warden
+# Agile Money
 
-Codename for **Tilly**: an AI agent that pays for you, within your rules.
-The model only proposes payments; deterministic Rust policy checks every one,
-and anything above a threshold waits for a human. Spec: [../docs/warden-spec.md](../docs/warden-spec.md).
+An AI agent that pays people for you and gets you paid, within rules you set.
+
+You chat with it on Telegram: "pay Acme Design 5 USDC for the logo", or "request 20 USD
+from Dana for the website". The language model only *proposes* payments. Deterministic
+Rust policy checks every one, anything above your threshold waits for your tap, and the only
+code that signs is a small executor that acts on intents that passed policy.
+
+## What it does
+
+- **Pays on Solana** in SOL and USDC (devnet by default), with an explorer link for every
+  confirmed payment. A retry never pays twice.
+- **Gets you paid** with Solana Pay links and QR codes, or PayPal checkout links for USD. A
+  watcher notices when the money arrives and tells you.
+- **Asks before it pays** anything above `approval_above`, in Telegram or on the dashboard.
+  The first answer wins and closes the other.
+- **Only pays your contacts.** A new or changed address needs an authenticator code once
+  codes are on, then waits out a cooling-off period.
+- **Caps spending** per payment and per day, per asset. `/pause` stops all payments and
+  survives restarts.
+- **Can hold funds in an on-chain vault** ([contracts/sol/vault](contracts/sol/vault)) that
+  enforces owner-signed limits even if the bot's key leaks.
+- **Has a web dashboard** for approvals, history, payment requests, contacts, limits and
+  security. You sign in with a password or a linked Solana wallet, plus your authenticator
+  code, and confirm your Telegram account from the Profile page.
+
+## How it fits together
+
+```
+Telegram / dashboard ──▶ agent (LLM proposes) ──▶ policy (allow / ask / deny)
+                                                     │
+                                  owner approves ◀───┤
+                                                     ▼
+                               executor (signs) ──▶ rail (Solana, PayPal)
+                                     │
+                              Postgres event log + outbox
+```
+
+Every step is an event in Postgres, so a crash mid-payment resumes instead of paying twice.
 
 ## Layout
 
 | Path | Crate | Job |
 | --- | --- | --- |
-| `crates/domain` | `warden-domain` | Types, events, state machines, ports. No I/O. |
-| `crates/policy` | `warden-policy` | Rule pipeline: Allow / RequireApproval / Deny |
-| `crates/agent/core` | `warden-agent-core` | Agent loop, `Llm` and `Tool` ports, streaming LLM client |
-| `crates/store` | `warden-store` | Postgres event log + outbox (sqlx) |
-| `crates/executor` | `warden-executor` | The only code that signs |
-| `crates/rail/*` | `warden-rail-*` | One crate per network |
-| `crates/scout` | `warden-scout` | Tavily search via Bifrost |
-| `crates/x402` | `warden-x402` | HTTP 402 challenges and proofs |
-| `apps/telegram/bot` | `warden-telegram-bot` | Tilly on Telegram |
-| `apps/shop` | `warden-shop` | Instagram/WhatsApp webhooks |
-| `apps/dashboard` | (npm) | Approvals, history and limits; Vite + React on a Cloudflare Worker |
+| `crates/domain` | `agile-money-domain` | Types, events, state machines, ports. No I/O. |
+| `crates/policy` | `agile-money-policy` | Rule pipeline: Allow / RequireApproval / Deny |
+| `crates/agent/core` | `agile-money-agent-core` | Agent loop, `Llm` and `Tool` ports, streaming LLM client |
+| `crates/store` | `agile-money-store` | Postgres event log + outbox (sqlx) |
+| `crates/executor` | `agile-money-executor` | The only code that signs |
+| `crates/rail/sol` | `agile-money-rail-sol` | Solana: SOL, USDC, Solana Pay, the vault |
+| `crates/rail/paypal` | `agile-money-rail-paypal` | PayPal orders for incoming USD |
+| `crates/rail/{near,bch,concordium}` | `agile-money-rail-*` | Placeholders for more networks |
+| `crates/scout`, `crates/x402` | `agile-money-scout`, `agile-money-x402` | Placeholders: web search, HTTP 402 payments |
+| `apps/telegram/bot` | `agile-money-telegram-bot` | The Telegram bot and the dashboard's API |
+| `apps/shop` | `agile-money-shop` | Instagram/WhatsApp webhooks (early) |
+| `apps/dashboard` | (npm) | Vite + React on a Cloudflare Worker |
+| `contracts/sol/vault` | `tilly-vault` | Solana program that bounds what the bot can pay out |
 
 `apps/dashboard`, `contracts/*` and `services/*` build with their own toolchains and
-sit outside the Cargo workspace.
+sit outside the Cargo workspace. A few names still say `tilly`, the project's first name:
+the vault program, its account tag and some derived ids. Changing them would orphan data
+that already exists, on chain or in the database.
 
-## Develop
+## Quick start
+
+You need Rust (pinned in `rust-toolchain.toml`), Docker, and
+[sqlx-cli](https://crates.io/crates/sqlx-cli) 0.9 with the postgres feature.
 
 ```bash
 cp .env.example .env
-docker compose up -d --wait postgres   # host port 5433
-sqlx migrate run                       # sqlx-cli 0.9 with the postgres feature
+docker compose up -d --wait postgres
+sqlx migrate run
 cargo test --workspace --all-features
 ```
 
-Run `sqlx migrate run` before the first build against a fresh database: the store's
-checked queries need the tables to exist (or build with `SQLX_OFFLINE=true` from `.sqlx/`).
-Once built, `cargo run -p warden-store --bin warden-migrate` applies migrations too.
+Then follow [Run the Telegram demo](#run-the-telegram-demo-solana-devnet) to talk to it.
 
-Apps also apply pending migrations on startup (`database.migrate_on_start` in `warden.toml`).
+## Develop
+
+Postgres listens on host port 5433. Run `sqlx migrate run` before the first build against a fresh database: the store's
+checked queries need the tables to exist (or build with `SQLX_OFFLINE=true` from `.sqlx/`).
+Once built, `cargo run -p agile-money-store --bin agile-money-migrate` applies migrations too.
+
+Apps also apply pending migrations on startup (`database.migrate_on_start` in `agile-money.toml`).
 After changing a query or migration, refresh the offline cache and commit `.sqlx/`:
 
 ```bash
@@ -45,38 +91,38 @@ cargo sqlx prepare --workspace -- --all-targets --all-features
 
 Store tests use `#[sqlx::test]`, which creates a throwaway database per test from `DATABASE_URL`.
 
-Apps build one rail per Cargo feature, e.g. `cargo run -p warden-shop --no-default-features --features paypal`.
+Apps build one rail per Cargo feature, e.g. `cargo run -p agile-money-shop --no-default-features --features paypal`.
 
 ## Run the Telegram demo (Solana devnet)
 
 1. Create a bot with @BotFather and put its token in `.env` as `TELOXIDE_TOKEN`.
-2. `warden.toml` uses DeepSeek V4 Flash on Cloudflare Workers AI. Put a Cloudflare API token
-   with Workers AI permission in `.env` as `WARDEN_AGENT__API_KEY`. For other providers, see
+2. `agile-money.toml` uses DeepSeek V4 Flash on Cloudflare Workers AI. Put a Cloudflare API token
+   with Workers AI permission in `.env` as `AGILE_MONEY_AGENT__API_KEY`. For other providers, see
    [Model providers](#model-providers).
 3. Make a devnet wallet and paste the printed line into `.env`. Then fund the address at
    https://faucet.solana.com:
 
    ```bash
-   cargo run -p warden-rail-sol --example keygen
+   cargo run -p agile-money-rail-sol --example keygen
    ```
 
 4. Start the bot and send it `/start`. It replies with your chat id. Set that id as
-   `WARDEN_TELEGRAM__OWNER_CHAT_ID` and restart.
+   `AGILE_MONEY_TELEGRAM__OWNER_CHAT_ID` and restart.
 5. Edit `[[contacts]]` and the per-asset limits in `[policy.sol]` and `[policy.usdc]` in
-   `warden.toml`, then chat: "pay Bob 0.01 SOL for lunch" or "pay Acme Design 5 USDC".
+   `agile-money.toml`, then chat: "pay Bob 0.01 SOL for lunch" or "pay Acme Design 5 USDC".
    Payments above `approval_above` wait for your Approve tap. Each confirmed payment links to the
    devnet explorer. For USDC, get devnet USDC for the wallet at https://faucet.circle.com
    (Solana Devnet). Drop `[policy.usdc]` to turn USDC off; an asset without limits can't be paid.
    The first USDC payment to a contact also creates their token account, about 0.002 SOL of rent
    paid by the wallet.
-6. To get paid, ask: "request 5 USDC from Dana for the website". Tilly records an invoice and
+6. To get paid, ask: "request 5 USDC from Dana for the website". Agile Money records an invoice and
    sends you a Solana Pay QR code and link to forward. Any Solana Pay wallet (Phantom, Solflare)
    can pay it. A watcher checks open requests every 10 seconds for a week, using the request's
    `reference`. When the total arrives it records `invoice_paid` and tells you, with an
    explorer link. No spending policy applies to money coming in.
 7. To take requests in USD by PayPal, create a REST app at https://developer.paypal.com
-   (sandbox) and set `WARDEN_RAIL__PAYPAL__CLIENT_ID` and `WARDEN_RAIL__PAYPAL__CLIENT_SECRET`.
-   Then ask: "request 20 USD from Dana for the logo". Tilly creates a PayPal order and sends
+   (sandbox) and set `AGILE_MONEY_RAIL__PAYPAL__CLIENT_ID` and `AGILE_MONEY_RAIL__PAYPAL__CLIENT_SECRET`.
+   Then ask: "request 20 USD from Dana for the logo". Agile Money creates a PayPal order and sends
    you its checkout link and QR code; the client pays by PayPal or card. The watcher captures
    the order once the client approves it, then tells you it's paid. Every PayPal write
    carries a `PayPal-Request-Id`, so a retry never charges twice. Pay sandbox orders with a
@@ -89,7 +135,7 @@ Apps build one rail per Cargo feature, e.g. `cargo run -p warden-shop --no-defau
    Deploying the Worker is in [apps/dashboard/README.md](apps/dashboard/README.md).
 
 ```bash
-cargo run -p warden-telegram-bot
+cargo run -p agile-money-telegram-bot
 ```
 
 By default the bot long-polls Telegram. When `telegram.webhook.url` (or `TUNNEL_URL`) is set it
@@ -99,7 +145,7 @@ while the bot is down, so updates queue until it is back. Without a secret it us
 per run. Locally, a Cloudflare Tunnel forwards the URL to the bot's listener:
 
 ```bash
-cloudflared tunnel --config ~/.cloudflared/tilly-dev.yml run
+cloudflared tunnel --config ~/.cloudflared/<your-tunnel>.yml run
 ```
 
 Remove the URL to go back to polling; polling mode deletes the webhook on start.
@@ -107,7 +153,7 @@ Remove the URL to go back to polling; polling mode deletes the webhook on start.
 The rail's live test sends 1000 lamports to its own wallet and checks that a retry doesn't pay twice:
 
 ```bash
-cargo test -p warden-rail-sol --features live --test live -- --nocapture
+cargo test -p agile-money-rail-sol --features live --test live -- --nocapture
 ```
 
 ## Deploy to a server
@@ -129,13 +175,13 @@ supports neither.
    docker compose logs -f bot
    ```
 
-Migrations run on start. The image bakes in `warden.toml` and nothing secret; `WARDEN_*`
+Migrations run on start. The image bakes in `agile-money.toml` and nothing secret; `AGILE_MONEY_*`
 variables in `bot.env` override it. The wallet key comes from env, which is fine for devnet;
 with real funds, keep keys in a KMS or HSM.
 
 ## Model providers
 
-`agent.provider` in `warden.toml` names the provider: `deepseek`, `claude`, `openai`, or
+`agent.provider` in `agile-money.toml` names the provider: `deepseek`, `claude`, `openai`, or
 `compatible` for any OpenAI-style endpoint (set `base_url` and `model`). Leave it unset and
 it is detected at startup:
 
@@ -145,12 +191,12 @@ it is detected at startup:
 
 The startup log lists the active provider, why it was chosen, and every provider whose
 key is present. A configured `provider` always wins. Its key comes from its own variable
-or `WARDEN_AGENT__API_KEY`. A gateway or a bare `WARDEN_AGENT__API_KEY` cannot say which
+or `AGILE_MONEY_AGENT__API_KEY`. A gateway or a bare `AGILE_MONEY_AGENT__API_KEY` cannot say which
 API to speak, so those need `provider` set.
 
 To go through Cloudflare AI Gateway, add `[agent.gateway]` with your `account_id` and
 `gateway_id`. Calls then go to `gateway.ai.cloudflare.com/v1/{account}/{gateway}/{provider}/`.
-For an authenticated gateway, set `WARDEN_AGENT__GATEWAY__TOKEN` (sent as
+For an authenticated gateway, set `AGILE_MONEY_AGENT__GATEWAY__TOKEN` (sent as
 `cf-aig-authorization`). If the gateway stores your provider key, leave the API key unset.
 With `provider = "compatible"`, the gateway's `compat` endpoint is used; give models as
 `provider/model`, e.g. `deepseek/deepseek-flash`.

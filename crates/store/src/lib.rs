@@ -1,5 +1,5 @@
 //! Postgres adapter for the event log, outbox and projections.
-//! `PgStore` implements [`warden_domain::ports::EventStore`] with compile-time checked queries.
+//! `PgStore` implements [`agile_money_domain::ports::EventStore`] with compile-time checked queries.
 
 mod contacts;
 mod event_store;
@@ -34,7 +34,7 @@ pub enum Error {
     Migrate(#[from] sqlx::migrate::MigrateError),
 }
 
-/// `[database]` in `warden.toml`; the url comes from `DATABASE_URL`, never the file.
+/// `[database]` in `agile-money.toml`; the url comes from `DATABASE_URL`, never the file.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DbConfig {
     pub url: SecretString,
@@ -74,7 +74,7 @@ impl PgStore {
     pub async fn connect(config: &DbConfig) -> Result<Self, Error> {
         let options = PgConnectOptions::from_str(config.url.expose_secret())
             .map_err(Error::Url)?
-            .application_name("warden")
+            .application_name("agile-money")
             // Server-side cap on every statement, so a stuck query cannot hold a money path.
             .options([(
                 "statement_timeout",

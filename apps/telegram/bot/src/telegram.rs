@@ -3,18 +3,18 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use agile_money_agent_core::{Agent, Message as Turn, RunObserver};
+use agile_money_domain::ports::ReadModel;
+use agile_money_domain::{Approval, ApprovalId, Intent, Proposed, RailRef, Untrusted, UserId};
+use agile_money_executor::{Notice, Notifier, PauseSwitch};
+use agile_money_policy::{Approver, Payments, ProposeOutcome, Resolution, fingerprint};
+use agile_money_rail_sol::{Cluster, SolRail};
+use agile_money_store::{ContactSource, ContactState, PgStore};
 use async_trait::async_trait;
 use teloxide::prelude::*;
 use teloxide::types::{
     BotCommand, ChatAction, InlineKeyboardButton, InlineKeyboardMarkup, MessageId,
 };
-use warden_agent_core::{Agent, Message as Turn, RunObserver};
-use warden_domain::ports::ReadModel;
-use warden_domain::{Approval, ApprovalId, Intent, Proposed, RailRef, Untrusted, UserId};
-use warden_executor::{Notice, Notifier, PauseSwitch};
-use warden_policy::{Approver, Payments, ProposeOutcome, Resolution, fingerprint};
-use warden_rail_sol::{Cluster, SolRail};
-use warden_store::{ContactSource, ContactState, PgStore};
 
 use crate::contacts::Desk;
 
@@ -133,7 +133,7 @@ impl Approver for TelegramApprover {
         &self,
         approval: &Approval,
         intent: &Intent<Proposed>,
-    ) -> Result<(), warden_policy::Error> {
+    ) -> Result<(), agile_money_policy::Error> {
         let id = approval.id.as_uuid().simple();
         let keyboard = InlineKeyboardMarkup::new([[
             InlineKeyboardButton::callback("Approve", format!("a:{id}")),
@@ -156,7 +156,7 @@ impl Approver for TelegramApprover {
             .send_message(self.chat, text)
             .reply_markup(keyboard)
             .await
-            .map_err(|e| warden_policy::Error::Channel(e.to_string()))?;
+            .map_err(|e| agile_money_policy::Error::Channel(e.to_string()))?;
         self.cards.open(approval.id, sent.id).await;
         Ok(())
     }
@@ -216,7 +216,7 @@ impl Notifier for TelegramNotifier {
     }
 }
 
-const HELP: &str = "Hi, I'm Tilly. Tell me who to pay and how much, e.g. \"pay Acme 0.1 SOL for the logo\".\n\n\
+const HELP: &str = "Hi, I'm Agile Money. Tell me who to pay and how much, e.g. \"pay Acme 0.1 SOL for the logo\".\n\n\
 To get paid, ask for a payment request, e.g. \"request 5 USDC from Dana for the website\", \
 or in USD by PayPal if it's set up. I'll send you a QR code to forward and tell you when it's paid.\n\n\
 Payments above your approval threshold, and the first payment to anyone, wait for your tap. Commands:\n\
@@ -293,7 +293,7 @@ async fn balances(app: &App) -> String {
     }
     for asset in app.rail.assets() {
         lines.push(match app.rail.balance_of(&asset).await {
-            Ok(minor) => format!("{}", warden_domain::Amount::new(minor, asset)),
+            Ok(minor) => format!("{}", agile_money_domain::Amount::new(minor, asset)),
             Err(e) => format!("{}: couldn't read the balance ({e})", asset.code),
         });
     }
@@ -314,7 +314,7 @@ async fn contact_list(app: &App) -> String {
     if contacts.is_empty() {
         return "No saved contacts yet. Add one with /addcontact Name Address.".to_owned();
     }
-    let line = |c: &warden_store::Contact| {
+    let line = |c: &agile_money_store::Contact| {
         let when = match (c.state, c.active_at) {
             (ContactState::Confirmed, Some(t)) => {
                 format!(" (can be paid from {} UTC)", t.strftime("%b %-d %H:%M"))
@@ -362,7 +362,7 @@ pub async fn on_message(bot: Bot, msg: Message, app: Arc<App>) -> ResponseResult
             bot.send_message(
                 msg.chat.id,
                 format!(
-                    "This Tilly belongs to someone else. Your chat id is {}.",
+                    "This Agile Money bot belongs to someone else. Your chat id is {}.",
                     msg.chat.id
                 ),
             )
@@ -635,7 +635,7 @@ pub async fn answer(app: &App, approval: ApprovalId, grant: bool) -> Result<Stri
         Ok(Resolution::Superseded) => {
             Ok("The payment changed after you were asked. Nothing was sent.".into())
         }
-        Err(warden_policy::Error::NotAwaiting(_)) => Err("Already answered.".into()),
+        Err(agile_money_policy::Error::NotAwaiting(_)) => Err("Already answered.".into()),
         Err(e) => Err(format!("Couldn't do that: {e}")),
     }
 }
@@ -658,7 +658,7 @@ mod tests {
             record(&[]),
             "[record: no payment was proposed in this turn]"
         );
-        let intent = warden_domain::IntentId::new(uuid::Uuid::nil());
+        let intent = agile_money_domain::IntentId::new(uuid::Uuid::nil());
         assert_eq!(
             record(&[
                 ProposeOutcome::Queued { intent },

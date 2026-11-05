@@ -1,12 +1,12 @@
-//! Tilly's shop agent: Instagram and WhatsApp webhooks on axum.
+//! Agile Money's shop agent: Instagram and WhatsApp webhooks on axum.
 
 mod config;
 
+use agile_money_store::PgStore;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::{Router, routing::get};
 use tracing_subscriber::EnvFilter;
-use warden_store::PgStore;
 
 use crate::config::Config;
 
@@ -25,7 +25,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", get(health))
         .with_state(store);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8080").await?;
-    tracing::info!(addr = %listener.local_addr()?, "Tilly shop listening");
+    tracing::info!(addr = %listener.local_addr()?, "Agile Money shop listening");
     axum::serve(listener, app).await?;
     Ok(())
 }

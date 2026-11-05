@@ -1,12 +1,12 @@
 //! The guardrail: runs an intent through its policy's ordered rules and returns a `Decision`.
 //! First `Deny` wins, then any `RequireApproval`, else `Allow`. Rules are pure functions.
 
-use async_trait::async_trait;
-use jiff::{Timestamp, civil::Time};
-use warden_domain::{
+use agile_money_domain::{
     Amount, Approval, Approved, Decision, Intent, Policy, Proposed, Rule, SpendSnapshot,
     TimeZoneName,
 };
+use async_trait::async_trait;
+use jiff::{Timestamp, civil::Time};
 
 mod pipeline;
 
@@ -15,9 +15,9 @@ pub use pipeline::{Payments, Proposed as ProposeOutcome, Resolution};
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
-    Domain(#[from] warden_domain::Error),
+    Domain(#[from] agile_money_domain::Error),
     #[error(transparent)]
-    Store(#[from] warden_domain::ports::StoreError),
+    Store(#[from] agile_money_domain::ports::StoreError),
     #[error("approval channel unavailable: {0}")]
     Channel(String),
     #[error("no approval {0} on this intent")]
@@ -169,7 +169,10 @@ fn quiet_hours(now: Timestamp, from: Time, to: Time, tz: &TimeZoneName) -> Decis
 }
 
 /// Rule 3: settled + reserved + this intent.
-fn window_total(spend: &SpendSnapshot, amount: &Amount) -> Result<Amount, warden_domain::Error> {
+fn window_total(
+    spend: &SpendSnapshot,
+    amount: &Amount,
+) -> Result<Amount, agile_money_domain::Error> {
     spend
         .settled
         .checked_add(&spend.reserved)?
@@ -185,7 +188,7 @@ fn in_window(t: Time, from: Time, to: Time) -> bool {
 }
 
 /// The start and end of an address, enough to check it against the real one by eye.
-pub fn fingerprint(address: &warden_domain::Address) -> String {
+pub fn fingerprint(address: &agile_money_domain::Address) -> String {
     let text = address.to_string();
     let chars: Vec<char> = text.chars().collect();
     if chars.len() <= 12 {

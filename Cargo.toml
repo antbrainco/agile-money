@@ -39,18 +39,18 @@ todo = "warn"
 
 [workspace.dependencies]
 # Internal crates
-warden-domain = { path = "crates/domain" }
-warden-agent-core = { path = "crates/agent/core" }
-warden-policy = { path = "crates/policy" }
-warden-store = { path = "crates/store" }
-warden-executor = { path = "crates/executor" }
-warden-rail-sol = { path = "crates/rail/sol" }
-warden-rail-paypal = { path = "crates/rail/paypal" }
-warden-rail-near = { path = "crates/rail/near" }
-warden-rail-bch = { path = "crates/rail/bch" }
-warden-rail-concordium = { path = "crates/rail/concordium" }
-warden-scout = { path = "crates/scout" }
-warden-x402 = { path = "crates/x402" }
+agile-money-domain = { path = "crates/domain" }
+agile-money-agent-core = { path = "crates/agent/core" }
+agile-money-policy = { path = "crates/policy" }
+agile-money-store = { path = "crates/store" }
+agile-money-executor = { path = "crates/executor" }
+agile-money-rail-sol = { path = "crates/rail/sol" }
+agile-money-rail-paypal = { path = "crates/rail/paypal" }
+agile-money-rail-near = { path = "crates/rail/near" }
+agile-money-rail-bch = { path = "crates/rail/bch" }
+agile-money-rail-concordium = { path = "crates/rail/concordium" }
+agile-money-scout = { path = "crates/scout" }
+agile-money-x402 = { path = "crates/x402" }
 
 # Core
 anyhow = "1.0.104"

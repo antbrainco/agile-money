@@ -1,9 +1,9 @@
 //! `EventStore` on Postgres: events and outbox rows go in one transaction (rule 11),
 //! and a unique `(stream, version)` turns concurrent appends into a `Conflict`.
 
+use agile_money_domain::ports::{EventStore, OutboxCommand, StoreError};
+use agile_money_domain::{Event, EventEnvelope, StreamId};
 use async_trait::async_trait;
-use warden_domain::ports::{EventStore, OutboxCommand, StoreError};
-use warden_domain::{Event, EventEnvelope, StreamId};
 
 use crate::PgStore;
 

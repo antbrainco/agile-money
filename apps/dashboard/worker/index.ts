@@ -13,7 +13,7 @@ interface Secrets {
 
 type Bindings = Env & Secrets;
 
-const COOKIE = "tilly_session";
+const COOKIE = "agile_money_session";
 /** Sessions last 12 hours. */
 const SESSION_SECONDS = 12 * 60 * 60;
 
@@ -144,7 +144,7 @@ async function forward(request: Request, url: URL, env: Bindings): Promise<Respo
       headers: { "content-type": "application/json", "cache-control": "no-store" },
     });
   } catch {
-    return json({ error: "Tilly is not reachable. Is the bot running?" }, 502);
+    return json({ error: "Agile Money is not reachable. Is the bot running?" }, 502);
   }
 }
 
@@ -166,7 +166,7 @@ async function forwardJson(
       headers: { "content-type": "application/json", "cache-control": "no-store" },
     });
   } catch {
-    return json({ error: "Tilly is not reachable. Is the bot running?" }, 502);
+    return json({ error: "Agile Money is not reachable. Is the bot running?" }, 502);
   }
 }
 

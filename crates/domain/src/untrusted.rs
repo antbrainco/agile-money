@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Data from outside Warden. It can be read, never trusted to raise limits,
+/// Data from outside Agile Money. It can be read, never trusted to raise limits,
 /// extend allowlists or skip approvals.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]

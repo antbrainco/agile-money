@@ -79,7 +79,7 @@ pub struct Reqwest(reqwest::Client);
 impl Reqwest {
     pub fn new(settings: &HttpSettings) -> Result<Self, HttpError> {
         let client = reqwest::Client::builder()
-            .user_agent(concat!("warden/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("agile-money/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(Duration::from_millis(settings.connect_timeout_ms))
             .read_timeout(Duration::from_millis(settings.read_timeout_ms))
             .build()?;

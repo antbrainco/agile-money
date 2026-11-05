@@ -7,6 +7,14 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use agile_money_agent_core::tools::parse_major;
+use agile_money_domain::ports::{EventStore, ReadModel};
+use agile_money_domain::{
+    Amount, ApprovalId, Asset, Decision, Event, EventEnvelope, IntentId, IntentState, Policy,
+    RailId, RailRef, Rule, StreamId,
+};
+use agile_money_policy::fingerprint;
+use agile_money_store::{Contact, ContactSource, ContactState, PolicySource, PolicyVersion};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::{self, Next};
@@ -18,21 +26,13 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use teloxide::prelude::*;
 use uuid::Uuid;
-use warden_agent_core::tools::parse_major;
-use warden_domain::ports::{EventStore, ReadModel};
-use warden_domain::{
-    Amount, ApprovalId, Asset, Decision, Event, EventEnvelope, IntentId, IntentState, Policy,
-    RailId, RailRef, Rule, StreamId,
-};
-use warden_policy::fingerprint;
-use warden_store::{Contact, ContactSource, ContactState, PolicySource, PolicyVersion};
 
 use crate::setup;
 use crate::telegram::{self, App};
 
 mod account;
 
-/// `[dashboard]`. On when `DASHBOARD_TOKEN` (or `WARDEN_DASHBOARD__TOKEN`) is set.
+/// `[dashboard]`. On when `DASHBOARD_TOKEN` (or `AGILE_MONEY_DASHBOARD__TOKEN`) is set.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DashboardConfig {
     /// At least 32 characters. From env only.
@@ -488,7 +488,7 @@ struct PolicyEdit {
 
 /// Saves the owner's limits as a new policy version (rule 9). Recipients and
 /// allowed assets stay as they are: contacts change through their own flow,
-/// assets in warden.toml. Raising a limit needs a code; lowering never does.
+/// assets in agile-money.toml. Raising a limit needs a code; lowering never does.
 async fn save_policy(State(api): State<Api>, Json(edit): Json<PolicyEdit>) -> Reply<PolicyView> {
     let app = &api.app;
     let agent = setup::agent_id(app.owner.0);
@@ -800,10 +800,10 @@ mod tests {
         .unwrap();
         assert!(loosens(&current.rules, &higher));
     }
-    use warden_domain::{AgentId, PolicyId};
+    use agile_money_domain::{AgentId, PolicyId};
 
     fn sol() -> Asset {
-        warden_rail_sol::sol()
+        agile_money_rail_sol::sol()
     }
 
     fn policy() -> Policy {

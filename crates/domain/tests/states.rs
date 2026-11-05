@@ -1,9 +1,9 @@
 #![allow(clippy::unwrap_used)] // helpers outside #[test] fns, which clippy.toml does not cover
 
+use agile_money_domain::*;
 use jiff::Timestamp;
 use proptest::prelude::*;
 use uuid::Uuid;
-use warden_domain::*;
 
 fn usdc(minor: u128) -> Amount {
     Amount::new(

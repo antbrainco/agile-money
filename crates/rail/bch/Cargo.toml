@@ -1,5 +1,5 @@
 [package]
-name = "warden-rail-bch"
+name = "agile-money-rail-bch"
 description = "Bitcoin Cash rail: a thin HTTP client to the services/bch/signer sidecar."
 version.workspace = true
 edition.workspace = true
@@ -9,7 +9,7 @@ publish.workspace = true
 
 [dependencies]
 thiserror.workspace = true
-warden-domain.workspace = true
+agile-money-domain.workspace = true
 
 [lints]
 workspace = true

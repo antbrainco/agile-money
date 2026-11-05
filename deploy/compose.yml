@@ -1,16 +1,16 @@
-# Tilly on a server: the bot, plus a Cloudflare Tunnel that carries Telegram's
+# Agile Money on a server: the bot, plus a Cloudflare Tunnel that carries Telegram's
 # webhook to it. Postgres is external (Neon). Run from this directory:
 #   docker compose up -d --build
 # Secrets live in ./bot.env (chmod 600), never in this file or the image.
 services:
   bot:
     build: ..
-    image: tilly-bot
+    image: agile-money-bot
     restart: unless-stopped
     env_file: bot.env
     environment:
       # Inside the compose network; only cloudflared reaches it. Nothing is published.
-      WARDEN_TELEGRAM__WEBHOOK__LISTEN: 0.0.0.0:8443
+      AGILE_MONEY_TELEGRAM__WEBHOOK__LISTEN: 0.0.0.0:8443
       RUST_LOG: ${RUST_LOG:-info}
     logging:
       driver: json-file

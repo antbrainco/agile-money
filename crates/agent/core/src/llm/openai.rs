@@ -310,7 +310,7 @@ impl StreamDecoder for Decoder {
 mod tests {
     use super::*;
     use crate::ToolSpec;
-    use warden_domain::Untrusted;
+    use agile_money_domain::Untrusted;
 
     fn sse(data: &str) -> SseEvent {
         SseEvent {

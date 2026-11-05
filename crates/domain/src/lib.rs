@@ -1,4 +1,4 @@
-//! Warden's core vocabulary: money, intents, policies, approvals, invoices and events.
+//! Agile Money's core vocabulary: money, intents, policies, approvals, invoices and events.
 //! Pure types and state machines only; every I/O boundary is a trait in [`ports`].
 
 mod approval;

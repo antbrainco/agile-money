@@ -1,9 +1,9 @@
 //! Keeps `intents_view` in step with the log, inside the append transaction, so
 //! spend checks never read a projection that lags its events.
 
+use agile_money_domain::ports::StoreError;
+use agile_money_domain::{Event, Intent, IntentId, IntentState, Proposed, StreamId};
 use sqlx::{Postgres, Transaction};
-use warden_domain::ports::StoreError;
-use warden_domain::{Event, Intent, IntentId, IntentState, Proposed, StreamId};
 
 use crate::event_store::backend;
 

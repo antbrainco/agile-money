@@ -1,8 +1,8 @@
 //! Applies `migrations/` to `DATABASE_URL` (read from `.env` if present):
-//! `cargo run -p warden-store --bin warden-migrate`.
+//! `cargo run -p agile-money-store --bin agile-money-migrate`.
 
+use agile_money_store::{DbConfig, PgStore};
 use secrecy::SecretString;
-use warden_store::{DbConfig, PgStore};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = PgStore::connect(&config).await?;
     store.migrate().await?;
     println!("migrations up to date:");
-    for m in warden_store::MIGRATOR.iter() {
+    for m in agile_money_store::MIGRATOR.iter() {
         println!("{} {}", m.version, m.description);
     }
     store.close().await;

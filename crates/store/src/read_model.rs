@@ -1,12 +1,12 @@
 //! `ReadModel` over `intents_view` and `policies`.
 
-use async_trait::async_trait;
-use jiff::Timestamp;
-use warden_domain::ports::{EventStore, ReadModel, StoreError};
-use warden_domain::{
+use agile_money_domain::ports::{EventStore, ReadModel, StoreError};
+use agile_money_domain::{
     Address, AgentId, Amount, ApprovalId, Asset, Event, EventEnvelope, IdempotencyKey, IntentId,
     Invoice, PaymentRequest, Policy, SpendSnapshot, StreamId,
 };
+use async_trait::async_trait;
+use jiff::Timestamp;
 
 use crate::PgStore;
 use crate::event_store::backend;
@@ -153,7 +153,7 @@ impl PgStore {
     pub async fn save_policy(
         &self,
         policy: &Policy,
-        by: warden_domain::UserId,
+        by: agile_money_domain::UserId,
         source: PolicySource,
     ) -> Result<(), StoreError> {
         let body = serde_json::to_value(policy).map_err(backend)?;
@@ -253,7 +253,7 @@ impl PgStore {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PolicySource {
-    /// `warden.toml`, at startup.
+    /// `agile-money.toml`, at startup.
     Config,
     /// The owner, on the dashboard.
     Dashboard,

@@ -1,5 +1,5 @@
 [package]
-name = "warden-agent-core"
+name = "agile-money-agent-core"
 description = "Agent loop and provider-agnostic LLM client: tools read or propose, never pay."
 version.workspace = true
 edition.workspace = true
@@ -21,8 +21,8 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 url.workspace = true
-warden-domain.workspace = true
-warden-policy.workspace = true
+agile-money-domain.workspace = true
+agile-money-policy.workspace = true
 
 [lints]
 workspace = true

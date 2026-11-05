@@ -2,11 +2,11 @@
 
 #![allow(clippy::unwrap_used)] // helpers outside #[test] fns, which clippy.toml does not cover
 
+use agile_money_agent_core::{Chunk, Error, Llm, LlmSettings, Message, Provider, Reply};
+use agile_money_domain::Untrusted;
 use futures_util::StreamExt;
 use secrecy::SecretString;
 use serde_json::json;
-use warden_agent_core::{Chunk, Error, Llm, LlmSettings, Message, Provider, Reply};
-use warden_domain::Untrusted;
 use wiremock::matchers::{body_partial_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

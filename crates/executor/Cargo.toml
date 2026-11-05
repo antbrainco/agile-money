@@ -1,5 +1,5 @@
 [package]
-name = "warden-executor"
+name = "agile-money-executor"
 description = "Outbox worker: checks pause and idempotency, signs, submits, watches."
 version.workspace = true
 edition.workspace = true
@@ -14,11 +14,11 @@ serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-warden-domain.workspace = true
+agile-money-domain.workspace = true
 
 [dev-dependencies]
 uuid.workspace = true
-warden-domain = { workspace = true, features = ["mock"] }
+agile-money-domain = { workspace = true, features = ["mock"] }
 
 [lints]
 workspace = true

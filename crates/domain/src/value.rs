@@ -396,7 +396,7 @@ text!(
     }
 );
 
-// --- Warden's own -------------------------------------------------------------
+// --- Agile Money's own -------------------------------------------------------------
 
 text!(
     /// Dedupes a payment end to end (rule 10). Printable ASCII, no spaces.

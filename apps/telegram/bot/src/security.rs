@@ -1,5 +1,5 @@
 //! The owner's second factor: a TOTP code from an authenticator app. Telegram
-//! is the first factor, so anything that loosens what Tilly may pay (a new or
+//! is the first factor, so anything that loosens what Agile Money may pay (a new or
 //! changed contact, higher limits, resuming after a pause) also needs a code.
 //! Tightening (pausing, removing, lowering) never does.
 
@@ -58,7 +58,7 @@ fn payments_per_day() -> u32 {
 pub fn totp(secret: Secret) -> anyhow::Result<Totp> {
     Builder::new()
         .with_secret(secret)
-        .with_issuer(Some("Tilly"))
+        .with_issuer(Some("Agile Money"))
         .with_account_name("owner")
         .build()
         .map_err(|e| anyhow::anyhow!("TOTP secret: {e:?}"))
@@ -343,7 +343,11 @@ mod tests {
         let guard = Guard::new(None).unwrap();
         let now = Timestamp::from_second(1_800_000_000).unwrap();
         let enrolment = guard.begin(now).unwrap();
-        assert!(enrolment.url.starts_with("otpauth://totp/Tilly:owner?"));
+        assert!(
+            enrolment
+                .url
+                .starts_with("otpauth://totp/Agile%20Money:owner?")
+        );
         let app = phone(&enrolment);
         let first = code(&app, now);
         let enrolled = guard.finish(&first, now).unwrap();

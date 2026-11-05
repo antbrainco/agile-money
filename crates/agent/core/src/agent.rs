@@ -4,12 +4,12 @@
 
 use std::sync::Arc;
 
+use agile_money_domain::ports::{Clock, IdGen};
+use agile_money_domain::{AgentId, RunId, RunState, RunTrigger, STEP_LIMIT, Untrusted};
+use agile_money_policy::{Payments, ProposeOutcome};
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use serde_json::{Value, json};
-use warden_domain::ports::{Clock, IdGen};
-use warden_domain::{AgentId, RunId, RunState, RunTrigger, STEP_LIMIT, Untrusted};
-use warden_policy::{Payments, ProposeOutcome};
 
 use crate::prompt::{Briefing, system_prompt};
 use crate::{Chunk, DynTool, Error, Llm, Message, Reply, ToolCtx, ToolOutput, ToolSpec};
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn a_queued_payment_says_when_sending_is_paused() {
-        let intent = warden_domain::IntentId::new(uuid::Uuid::nil());
+        let intent = agile_money_domain::IntentId::new(uuid::Uuid::nil());
         let outcome = ProposeOutcome::Queued { intent };
         let running = describe(&outcome, "1 SOL to Bob", false);
         assert!(running.get("paused").is_none());

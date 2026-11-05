@@ -1,27 +1,27 @@
 //! Real devnet transfers. Run with a funded devnet keypair:
-//! `WARDEN_RAIL__SOL__KEYPAIR=... cargo test -p warden-rail-sol --features live --test live -- --nocapture`
+//! `AGILE_MONEY_RAIL__SOL__KEYPAIR=... cargo test -p agile-money-rail-sol --features live --test live -- --nocapture`
 //! Without the keypair it skips, so `--all-features` in CI stays offline.
 
 #![cfg(feature = "live")]
 #![allow(clippy::expect_used, clippy::unwrap_used)] // helpers outside #[test] fns
 
-use jiff::Timestamp;
-use secrecy::SecretString;
-use uuid::Uuid;
-use warden_domain::ports::Rail;
-use warden_domain::{
+use agile_money_domain::ports::Rail;
+use agile_money_domain::{
     Address, AgentId, Amount, Decision, IdempotencyKey, Intent, IntentId, Provenance, RailRef,
     Recipient, RunId, Settlement,
 };
-use warden_rail_sol::{Cluster, DEVNET_URL, SolConfig, SolRail};
+use agile_money_rail_sol::{Cluster, DEVNET_URL, SolConfig, SolRail};
+use jiff::Timestamp;
+use secrecy::SecretString;
+use uuid::Uuid;
 
 fn rail() -> Option<SolRail> {
-    let Ok(keypair) = std::env::var("WARDEN_RAIL__SOL__KEYPAIR") else {
-        eprintln!("skipped: set WARDEN_RAIL__SOL__KEYPAIR to a funded devnet keypair");
+    let Ok(keypair) = std::env::var("AGILE_MONEY_RAIL__SOL__KEYPAIR") else {
+        eprintln!("skipped: set AGILE_MONEY_RAIL__SOL__KEYPAIR to a funded devnet keypair");
         return None;
     };
     let rail = SolRail::new(&SolConfig {
-        rpc_url: std::env::var("WARDEN_RAIL__SOL__RPC_URL")
+        rpc_url: std::env::var("AGILE_MONEY_RAIL__SOL__RPC_URL")
             .as_deref()
             .unwrap_or(DEVNET_URL)
             .parse()
@@ -53,7 +53,7 @@ async fn pays_once_and_confirms_on_devnet() {
     let intent = Intent::new(
         id,
         AgentId::new(Uuid::now_v7()),
-        Amount::new(u128::from(amount), warden_rail_sol::sol()),
+        Amount::new(u128::from(amount), agile_money_rail_sol::sol()),
         Recipient {
             label: "self".into(),
             address: Address::SolPubkey(rail.address()),

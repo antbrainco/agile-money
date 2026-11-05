@@ -4,7 +4,7 @@
 //! shown on screen once and nowhere else.
 //!
 //! ```sh
-//! cargo run -p warden-telegram-bot --example totp_setup
+//! cargo run -p agile-money-telegram-bot --example totp_setup
 //! ```
 
 use std::io::{BufRead, Write};
@@ -30,7 +30,7 @@ fn main() -> anyhow::Result<()> {
     let encoded = secret.to_base32();
     let totp = Builder::new()
         .with_secret(secret)
-        .with_issuer(Some("Tilly"))
+        .with_issuer(Some("Agile Money"))
         .with_account_name("owner")
         .build()
         .map_err(|e| anyhow::anyhow!("TOTP: {e:?}"))?;
@@ -53,7 +53,7 @@ fn main() -> anyhow::Result<()> {
         stdin.lock().read_line(&mut line)?;
         if totp.check_current(line.trim()).is_some() {
             save(&env, &encoded)?;
-            println!("\nDone. TOTP_SECRET is in {ENV}; restart Tilly to turn codes on.");
+            println!("\nDone. TOTP_SECRET is in {ENV}; restart Agile Money to turn codes on.");
             return Ok(());
         }
         println!("That code doesn't match. Check the clock on your phone and try again.");

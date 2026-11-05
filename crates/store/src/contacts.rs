@@ -1,9 +1,9 @@
 //! Saved payees, the pause switch and open approval cards.
 
+use agile_money_domain::ports::StoreError;
+use agile_money_domain::{Address, AgentId};
 use jiff::Timestamp;
 use uuid::Uuid;
-use warden_domain::ports::StoreError;
-use warden_domain::{Address, AgentId};
 
 use crate::PgStore;
 use crate::event_store::backend;
@@ -59,7 +59,7 @@ impl std::str::FromStr for ContactState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContactSource {
-    /// `[[contacts]]` in `warden.toml`: whoever edits it already holds the keys.
+    /// `[[contacts]]` in `agile-money.toml`: whoever edits it already holds the keys.
     Config,
     Telegram,
     Dashboard,

@@ -1,5 +1,5 @@
 [package]
-name = "warden-scout"
+name = "agile-money-scout"
 description = "Web research for the agent: Tavily search via Bifrost, results tagged Untrusted."
 version.workspace = true
 edition.workspace = true
@@ -10,7 +10,7 @@ publish.workspace = true
 [dependencies]
 serde.workspace = true
 thiserror.workspace = true
-warden-domain.workspace = true
+agile-money-domain.workspace = true
 
 [lints]
 workspace = true

@@ -1,9 +1,9 @@
 //! `Outbox` on Postgres. `FOR UPDATE SKIP LOCKED` lets several executors claim
 //! jobs without blocking each other; the lease returns a crashed worker's job.
 
+use agile_money_domain::ports::{Outbox, OutboxJob, StoreError};
 use async_trait::async_trait;
 use jiff::SignedDuration;
-use warden_domain::ports::{Outbox, OutboxJob, StoreError};
 
 use crate::PgStore;
 use crate::event_store::backend;

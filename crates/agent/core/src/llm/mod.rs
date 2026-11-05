@@ -115,7 +115,7 @@ fn tool_call(id: &str, name: &str, args: &str) -> Result<ToolCall, Error> {
     Ok(ToolCall {
         id: id
             .parse()
-            .map_err(|e: warden_domain::InvalidValue| Error::Llm(e.to_string()))?,
+            .map_err(|e: agile_money_domain::InvalidValue| Error::Llm(e.to_string()))?,
         name: name.to_owned(),
         args,
     })

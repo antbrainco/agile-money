@@ -2,15 +2,15 @@ services:
   postgres:
     image: postgres:17
     environment:
-      POSTGRES_USER: warden
-      POSTGRES_PASSWORD: warden
-      POSTGRES_DB: warden
+      POSTGRES_USER: agile_money
+      POSTGRES_PASSWORD: agile_money
+      POSTGRES_DB: agile_money
     ports:
       - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U warden"]
+      test: ["CMD-SHELL", "pg_isready -U agile_money"]
       interval: 2s
       retries: 15
 

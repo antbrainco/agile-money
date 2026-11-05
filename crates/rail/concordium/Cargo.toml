@@ -1,5 +1,5 @@
 [package]
-name = "warden-rail-concordium"
+name = "agile-money-rail-concordium"
 description = "Concordium rail with identity proofs and x402 payments."
 version.workspace = true
 edition.workspace = true
@@ -9,7 +9,7 @@ publish.workspace = true
 
 [dependencies]
 thiserror.workspace = true
-warden-domain.workspace = true
+agile-money-domain.workspace = true
 
 [lints]
 workspace = true

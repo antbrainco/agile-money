@@ -1,6 +1,6 @@
 # dashboard
 
-Tilly's dashboard: answer approvals, see payments and payment requests, edit the
+Agile Money's dashboard: answer approvals, see payments and payment requests, edit the
 spending limits, and pause payments. A Vite + React app served by a Cloudflare
 Worker (`worker/index.ts`).
 
@@ -9,10 +9,15 @@ Worker (`worker/index.ts`).
 - The Worker signs the owner in with `DASHBOARD_PASSWORD`, sets a 12-hour signed
   cookie, and forwards `/api/*` to `BOT_API_URL` with the bot's token. The token
   never reaches the browser.
+- Or the owner signs in with a Solana wallet linked under Profile: the wallet signs
+  a one-time message naming the dashboard's host (`/auth/wallet/challenge`, then
+  `/auth/wallet`). The authenticator code is still asked for once codes are on.
+- Profile also confirms the owner's Telegram account with a one-time `t.me` link
+  that only the owner chat can redeem.
 - Approvals go to Telegram and here at once. The first answer wins, and answering
   here closes the Telegram card (rule 8).
 - A limits edit is saved as a new policy version marked `dashboard` (rule 9).
-  Startup only reseeds from warden.toml when the file changed, so these edits
+  Startup only reseeds from agile-money.toml when the file changed, so these edits
   survive a restart.
 
 ## Run locally

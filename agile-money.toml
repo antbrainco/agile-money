@@ -1,4 +1,4 @@
-# Non-secret config. Overridden by WARDEN_* env vars (figment); secrets never go here.
+# Non-secret config. Overridden by AGILE_MONEY_* env vars (figment); secrets never go here.
 network = "devnet" # mainnet also needs a per-rail opt-in below (rule 5)
 
 [database] # url comes from DATABASE_URL
@@ -8,7 +8,7 @@ statement_timeout_ms = 10000
 migrate_on_start = true
 
 [telegram] # token comes from TELOXIDE_TOKEN
-# Your chat id; message the bot /start to learn it. Or set WARDEN_TELEGRAM__OWNER_CHAT_ID.
+# Your chat id; message the bot /start to learn it. Or set AGILE_MONEY_TELEGRAM__OWNER_CHAT_ID.
 owner_chat_id = 0
 
 # Updates by webhook instead of long polling, on when a URL is set. Needs the tunnel:
@@ -34,7 +34,7 @@ watch_delay_ms = 2000
 # provider = "deepseek"         # deepseek | claude | openai | compatible
 step_limit = 12
 # Cloudflare's unified AI REST API (OpenAI format), routed through the `my-gateway`
-# gateway. The key is a Cloudflare API token: set WARDEN_AGENT__API_KEY. Third-party
+# gateway. The key is a Cloudflare API token: set AGILE_MONEY_AGENT__API_KEY. Third-party
 # models bill through Unified Billing, so no provider key is needed.
 provider = "compatible"
 # DeepSeek V4 Flash on Workers AI: function calling, ~1.6s per step. Stronger but
@@ -55,7 +55,7 @@ request_timeout_ms = 120000     # whole call, non-streaming only
 max_retries = 2                 # on 408/409/429/5xx and connect errors, honouring Retry-After
 
 # Route through Cloudflare AI Gateway. Exclusive with base_url. For an authenticated
-# gateway set WARDEN_AGENT__GATEWAY__TOKEN; with stored keys (BYOK) the API key is optional.
+# gateway set AGILE_MONEY_AGENT__GATEWAY__TOKEN; with stored keys (BYOK) the API key is optional.
 # [agent.gateway]
 # account_id = "your-account-id"
 # gateway_id = "default"
@@ -74,21 +74,21 @@ cf-aig-gateway-id = "my-gateway"
 # betas = []
 # thinking_budget = 1024        # below max_tokens
 
-[rail.sol] # keypair comes from WARDEN_RAIL__SOL__KEYPAIR
+[rail.sol] # keypair comes from AGILE_MONEY_RAIL__SOL__KEYPAIR
 rpc_url = "https://api.devnet.solana.com"
 mainnet = false
 
 # On-chain vault (contracts/sol/vault): SOL is held by the program and paid out only
 # within the per-payment cap, daily cap and recipient list the owner key signed for.
 # The bot's keypair can ask it to pay but can't change those. Set up with
-# `cargo run -p warden-rail-sol --example vault`; both values are public keys.
+# `cargo run -p agile-money-rail-sol --example vault`; both values are public keys.
 # Remove this section to pay from the bot's wallet again.
 [rail.sol.vault]
 program = "<VAULT_PROGRAM_ID>"
 owner = "<OWNER_PUBKEY>"
 
 # PayPal: payment requests in USD as checkout links, paid by PayPal or card. On when
-# WARDEN_RAIL__PAYPAL__CLIENT_ID and WARDEN_RAIL__PAYPAL__CLIENT_SECRET are set, from a
+# AGILE_MONEY_RAIL__PAYPAL__CLIENT_ID and AGILE_MONEY_RAIL__PAYPAL__CLIENT_SECRET are set, from a
 # sandbox REST app at developer.paypal.com. Sandbox unless live = true (rule 5).
 # [rail.paypal]
 # live = false

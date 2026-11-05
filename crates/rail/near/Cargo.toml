@@ -1,5 +1,5 @@
 [package]
-name = "warden-rail-near"
+name = "agile-money-rail-near"
 description = "NEAR rail; caps are re-checked onchain by the guardrails contract."
 version.workspace = true
 edition.workspace = true
@@ -9,7 +9,7 @@ publish.workspace = true
 
 [dependencies]
 thiserror.workspace = true
-warden-domain.workspace = true
+agile-money-domain.workspace = true
 
 [lints]
 workspace = true

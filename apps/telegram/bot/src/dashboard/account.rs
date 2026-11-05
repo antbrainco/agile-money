@@ -30,7 +30,7 @@ fn host(headers: &HeaderMap) -> String {
         .get("x-dashboard-host")
         .and_then(|v| v.to_str().ok())
         .filter(|h| !h.is_empty() && h.len() <= 253)
-        .unwrap_or("Tilly dashboard")
+        .unwrap_or("Agile Money dashboard")
         .to_owned()
 }
 
@@ -225,7 +225,7 @@ async fn link_wallet(State(api): State<Api>, Json(req): Json<LinkWallet>) -> Rep
             StatusCode::CONFLICT,
             format!(
                 "You can link up to {} wallets. Remove one first.",
-                warden_store::MAX_WALLETS
+                agile_money_store::MAX_WALLETS
             ),
         ));
     }

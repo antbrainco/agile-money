@@ -1,15 +1,16 @@
 //! Identities and the owner's policy, derived from config.
 
+use agile_money_agent_core::Briefing;
+use agile_money_domain::ports::ReadModel;
+use agile_money_domain::{Address, AgentId, Policy, PolicyId, Recipient, Rule, UserId};
+use agile_money_store::{PgStore, PolicySource};
 use jiff::SignedDuration;
 use uuid::Uuid;
-use warden_agent_core::Briefing;
-use warden_domain::ports::ReadModel;
-use warden_domain::{Address, AgentId, Policy, PolicyId, Recipient, Rule, UserId};
-use warden_store::{PgStore, PolicySource};
 
 use crate::config::{AssetPolicy, Config, Contact, Network};
 
-/// "tilly" in ASCII, so ids derived from a chat are recognisable.
+/// "tilly" in ASCII (the project's first name), so ids derived from a chat are
+/// recognisable. Changing it would orphan every stored agent.
 const NAMESPACE: u64 = 0x7469_6c6c_7900_0000;
 
 /// One agent per owner chat, stable across restarts.
@@ -64,7 +65,7 @@ pub fn briefing(config: &Config, assets: &[AssetPolicy]) -> Briefing {
             .rail
             .paypal
             .as_ref()
-            .map(|_| vec![warden_rail_paypal::usd().code.to_string()])
+            .map(|_| vec![agile_money_rail_paypal::usd().code.to_string()])
             .unwrap_or_default(),
         limits,
     }
@@ -104,7 +105,7 @@ fn rules(config: &Config, assets: &[AssetPolicy]) -> Vec<Rule> {
     rules
 }
 
-/// Stores the configured policy as a new version when warden.toml's limits
+/// Stores the configured policy as a new version when agile-money.toml's limits
 /// changed since they were last seeded. Otherwise the latest version stands,
 /// including one the owner saved on the dashboard. The recipient allowlist is
 /// left out of the comparison and carried over: the contacts desk owns it.
