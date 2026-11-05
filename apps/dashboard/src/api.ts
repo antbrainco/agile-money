@@ -76,6 +76,26 @@ export interface ContactsView {
   cooling_off: string;
 }
 
+/** A started authenticator enrolment. `key` and `url` hold the secret. */
+export interface CodeSetup {
+  url: string;
+  key: string;
+  /** SVG document. */
+  qr: string;
+}
+
+export interface Profile {
+  telegram: {
+    chat_id: number;
+    bot: string | null;
+    name: string | null;
+    username: string | null;
+    linked_at: string | null;
+  };
+  wallets: { address: string; label: string; linked_at: string }[];
+  codes: boolean;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -105,6 +125,10 @@ export const api = {
   session: () => call<{ signedIn: boolean }>("/auth/session"),
   login: (password: string, code?: string) =>
     call<{ ok: true }>("/auth/login", send({ password, code })),
+  walletChallenge: (address: string) =>
+    call<{ message: string }>("/auth/wallet/challenge", send({ address })),
+  walletLogin: (address: string, signature: string, code?: string) =>
+    call<{ ok: true }>("/auth/wallet", send({ address, signature, code })),
   logout: () => call<{ ok: true }>("/auth/logout", send({})),
   overview: () => call<Overview>("/api/overview"),
   approvals: () => call<IntentRow[]>("/api/approvals"),
@@ -121,4 +145,14 @@ export const api = {
     call<ContactsView>("/api/contacts", send({ label, address, code })),
   changeContact: (id: string, action: "cancel" | "remove") =>
     call<ContactsView>(`/api/contacts/${id}/${action}`, { method: "POST" }),
+  codesSetup: () => call<CodeSetup>("/api/codes/setup", send({})),
+  profile: () => call<Profile>("/api/profile"),
+  linkChallenge: (address: string) =>
+    call<{ message: string }>("/api/wallet/challenge", send({ address, purpose: "link" })),
+  linkWallet: (address: string, signature: string, label: string, code?: string) =>
+    call<Profile>("/api/wallets", send({ address, signature, label, code })),
+  unlinkWallet: (address: string) =>
+    call<Profile>(`/api/wallets/${encodeURIComponent(address)}/remove`, { method: "POST" }),
+  telegramLink: () => call<{ url: string }>("/api/telegram/link", send({})),
+  codesConfirm: (code: string) => call<Overview>("/api/codes/confirm", send({ code })),
 };

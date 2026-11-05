@@ -257,6 +257,34 @@ impl PgStore {
 }
 
 impl PgStore {
+    /// The authenticator secret enrolled from the dashboard, base32.
+    pub async fn owner_code(&self, agent: AgentId) -> Result<Option<String>, StoreError> {
+        sqlx::query_scalar!(
+            "SELECT secret FROM owner_codes WHERE agent_id = $1",
+            agent.as_uuid()
+        )
+        .fetch_optional(self.pool())
+        .await
+        .map_err(backend)
+    }
+
+    /// Stores the first enrolled secret. False when one is already stored:
+    /// an existing secret is never replaced from here.
+    pub async fn save_owner_code(&self, agent: AgentId, secret: &str) -> Result<bool, StoreError> {
+        let done = sqlx::query!(
+            "INSERT INTO owner_codes (agent_id, secret) VALUES ($1, $2)
+             ON CONFLICT (agent_id) DO NOTHING",
+            agent.as_uuid(),
+            secret,
+        )
+        .execute(self.pool())
+        .await
+        .map_err(backend)?;
+        Ok(done.rows_affected() == 1)
+    }
+}
+
+impl PgStore {
     /// Remembers which message carries an approval's buttons.
     pub async fn open_card(&self, approval: Uuid, message: i32) -> Result<(), StoreError> {
         sqlx::query!(

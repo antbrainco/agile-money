@@ -22,6 +22,9 @@ async fn creates_all_tables(pool: PgPool) {
             "idempotency",
             "intents_view",
             "outbox",
+            "owner_codes",
+            "owner_telegram",
+            "owner_wallets",
             "policies",
             "switches"
         ]

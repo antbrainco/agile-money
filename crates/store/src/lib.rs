@@ -4,10 +4,12 @@
 mod contacts;
 mod event_store;
 mod outbox;
+mod profile;
 mod projection;
 mod read_model;
 
 pub use contacts::{Contact, ContactSource, ContactState};
+pub use profile::{MAX_WALLETS, OwnerTelegram, OwnerWallet};
 pub use read_model::{PolicySource, PolicyVersion};
 
 use std::str::FromStr;

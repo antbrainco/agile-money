@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO owner_telegram (agent_id, name, username) VALUES ($1, $2, $3)\n             ON CONFLICT (agent_id) DO UPDATE SET name = $2, username = $3, linked_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "818304d91ba14aca73f0a95c73625f4c8e390aa839aa795743d31dc594f43078"
+}

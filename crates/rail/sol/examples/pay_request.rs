@@ -45,12 +45,8 @@ fn minor(amount: &str, decimals: u32) -> u64 {
 
 async fn send(rpc: &RpcClient, ixs: &[Instruction], signers: &[&Keypair]) -> String {
     let blockhash = rpc.get_latest_blockhash().await.unwrap();
-    let tx = Transaction::new_signed_with_payer(
-        ixs,
-        Some(&signers[0].pubkey()),
-        signers,
-        blockhash,
-    );
+    let tx =
+        Transaction::new_signed_with_payer(ixs, Some(&signers[0].pubkey()), signers, blockhash);
     rpc.send_and_confirm_transaction(&tx)
         .await
         .unwrap()
@@ -144,12 +140,7 @@ async fn main() {
     let paid = send(
         &rpc,
         &[
-            create_associated_token_account_idempotent(
-                &payer.pubkey(),
-                &recipient,
-                &mint,
-                &token,
-            ),
+            create_associated_token_account_idempotent(&payer.pubkey(), &recipient, &mint, &token),
             transfer,
         ],
         &[&payer],

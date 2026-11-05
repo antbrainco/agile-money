@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO owner_wallets (agent_id, address, label)\n             SELECT $1, $2, $3\n             WHERE (SELECT count(*) FROM owner_wallets WHERE agent_id = $1 AND address <> $2) < $4\n             ON CONFLICT (agent_id, address) DO UPDATE SET label = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a749c0037395b045f708ab75c586a6bec8e6919a212692561dedb9a858f0c652"
+}

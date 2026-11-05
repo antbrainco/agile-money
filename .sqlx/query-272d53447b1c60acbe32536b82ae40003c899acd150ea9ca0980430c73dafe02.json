@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT secret FROM owner_codes WHERE agent_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "secret",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "owner_codes",
+            "name": "secret"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "272d53447b1c60acbe32536b82ae40003c899acd150ea9ca0980430c73dafe02"
+}

@@ -5,6 +5,7 @@ mod config;
 mod contacts;
 mod dashboard;
 mod invoices;
+mod profile;
 mod security;
 mod setup;
 mod telegram;
@@ -112,10 +113,20 @@ async fn main() -> anyhow::Result<()> {
     let (model, endpoint) = (llm.model().to_owned(), llm.endpoint().clone());
     let llm = Arc::new(llm);
     let book = ContactBook::default();
-    let guard = Arc::new(Guard::new(config.security.totp_secret.as_ref())?);
+    // TOTP_SECRET wins; otherwise a secret enrolled from the dashboard.
+    let enrolled = match &config.security.totp_secret {
+        Some(_) => None,
+        None => store
+            .owner_code(setup::agent_id(owner.0))
+            .await?
+            .map(secrecy::SecretString::from),
+    };
+    let guard = Arc::new(Guard::new(
+        config.security.totp_secret.as_ref().or(enrolled.as_ref()),
+    )?);
     if !guard.enabled() {
         tracing::warn!(
-            "TOTP_SECRET is not set: contacts can only come from warden.toml, and /resume needs no code"
+            "authenticator codes are off: set them up from the dashboard; until then /resume needs no code"
         );
     }
     let desk = Arc::new(Desk::new(
@@ -252,6 +263,7 @@ async fn main() -> anyhow::Result<()> {
         turn,
         history: Mutex::default(),
         cards,
+        profile: profile::Linking::default(),
     });
     if let Some(conf) = &config.dashboard {
         dashboard::serve(conf, app.clone(), bot.clone()).await?;

@@ -1,5 +1,6 @@
-// The dashboard's Worker: the owner signs in with a password and, once codes are
-// set up, an authenticator code the bot checks. Then `/api/*` is forwarded to the
+// The dashboard's Worker: the owner signs in with a password, or a linked Solana
+// wallet's signature, and, once codes are set up, an authenticator code the bot
+// checks. Then `/api/*` is forwarded to the
 // bot's API with the bot's token. The token never reaches the browser; the
 // browser holds only a signed, short-lived session cookie.
 
@@ -25,6 +26,12 @@ export default {
     if (url.pathname === "/auth/login" && request.method === "POST") {
       return login(request, env);
     }
+    if (url.pathname === "/auth/wallet/challenge" && request.method === "POST") {
+      return walletChallenge(request, env);
+    }
+    if (url.pathname === "/auth/wallet" && request.method === "POST") {
+      return walletLogin(request, env);
+    }
     if (url.pathname === "/auth/logout" && request.method === "POST") {
       return json({ ok: true }, 200, cookie("", 0, url));
     }
@@ -41,9 +48,9 @@ export default {
   },
 } satisfies ExportedHandler<Bindings>;
 
-async function login(request: Request, env: Bindings): Promise<Response> {
-  // Slows password guessing. Approximate and per location; the bot's code check
-  // behind it is strict (five wrong codes lock codes for 15 minutes).
+/** Slows guessing. Approximate and per location; the bot's code check behind it
+ * is strict (five wrong codes lock codes for 15 minutes). */
+async function limited(request: Request, env: Bindings): Promise<Response | null> {
   const ip = request.headers.get("cf-connecting-ip") ?? "local";
   const [perIp, overall] = await Promise.all([
     env.LOGIN_LIMIT.limit({ key: `ip:${ip}` }),
@@ -52,6 +59,12 @@ async function login(request: Request, env: Bindings): Promise<Response> {
   if (!perIp.success || !overall.success) {
     return json({ error: "Too many sign-in attempts. Wait a minute." }, 429);
   }
+  return null;
+}
+
+async function login(request: Request, env: Bindings): Promise<Response> {
+  const slow = await limited(request, env);
+  if (slow) return slow;
   const body = (await request.json().catch(() => ({}))) as { password?: unknown; code?: unknown };
   // Copying from a file often brings a trailing newline or space along.
   const given = typeof body.password === "string" ? body.password.trim() : "";
@@ -60,11 +73,50 @@ async function login(request: Request, env: Bindings): Promise<Response> {
   }
   // The bot checks the code, or says none is set up, and tells Telegram.
   const code = typeof body.code === "string" ? body.code : undefined;
-  const check = await forwardJson("/api/sign-in", { code }, env);
+  const check = await forwardJson("/api/sign-in", { code }, env, request);
   if (!check.ok) return check;
+  return session(request, env);
+}
+
+/** The message a linked wallet signs to sign in. The bot names this host in it. */
+async function walletChallenge(request: Request, env: Bindings): Promise<Response> {
+  const slow = await limited(request, env);
+  if (slow) return slow;
+  const body = (await request.json().catch(() => ({}))) as { address?: unknown };
+  const address = typeof body.address === "string" ? body.address : "";
+  return forwardJson("/api/wallet/challenge", { address, purpose: "sign-in" }, env, request);
+}
+
+/** In place of the password: the bot checks the signature, the wallet is linked,
+ * and the code, and tells Telegram. */
+async function walletLogin(request: Request, env: Bindings): Promise<Response> {
+  const slow = await limited(request, env);
+  if (slow) return slow;
+  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const text = (key: string) => (typeof body[key] === "string" ? (body[key] as string) : undefined);
+  const check = await forwardJson(
+    "/api/sign-in/wallet",
+    { address: text("address") ?? "", signature: text("signature") ?? "", code: text("code") },
+    env,
+    request,
+  );
+  if (!check.ok) return check;
+  return session(request, env);
+}
+
+async function session(request: Request, env: Bindings): Promise<Response> {
   const expires = Math.floor(Date.now() / 1000) + SESSION_SECONDS;
   const value = `${expires}.${await sign(String(expires), env)}`;
   return json({ ok: true }, 200, cookie(value, SESSION_SECONDS, new URL(request.url)));
+}
+
+/** Headers for the bot: its token, and this dashboard's host for wallet messages. */
+function botHeaders(request: Request, env: Bindings): HeadersInit {
+  return {
+    authorization: `Bearer ${env.DASHBOARD_TOKEN}`,
+    "content-type": "application/json",
+    "x-dashboard-host": new URL(request.url).host,
+  };
 }
 
 async function signedIn(request: Request, env: Bindings): Promise<boolean> {
@@ -80,10 +132,7 @@ async function forward(request: Request, url: URL, env: Bindings): Promise<Respo
   const target = new URL(url.pathname + url.search, env.BOT_API_URL);
   const init: RequestInit = {
     method: request.method,
-    headers: {
-      authorization: `Bearer ${env.DASHBOARD_TOKEN}`,
-      "content-type": "application/json",
-    },
+    headers: botHeaders(request, env),
   };
   if (request.method !== "GET" && request.method !== "HEAD") {
     init.body = await request.text();
@@ -100,14 +149,16 @@ async function forward(request: Request, url: URL, env: Bindings): Promise<Respo
 }
 
 /** POSTs JSON to the bot from the Worker itself, not on the browser's behalf. */
-async function forwardJson(path: string, body: unknown, env: Bindings): Promise<Response> {
+async function forwardJson(
+  path: string,
+  body: unknown,
+  env: Bindings,
+  request: Request,
+): Promise<Response> {
   try {
     const reply = await fetch(new URL(path, env.BOT_API_URL), {
       method: "POST",
-      headers: {
-        authorization: `Bearer ${env.DASHBOARD_TOKEN}`,
-        "content-type": "application/json",
-      },
+      headers: botHeaders(request, env),
       body: JSON.stringify(body),
     });
     return new Response(reply.body, {

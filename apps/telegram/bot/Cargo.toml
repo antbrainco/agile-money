@@ -14,7 +14,7 @@ async-trait.workspace = true
 dotenvy.workspace = true
 jiff.workspace = true
 png.workspace = true
-qrcode.workspace = true
+qrcode = { workspace = true, features = ["svg"] }
 secrecy.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 teloxide.workspace = true
@@ -23,6 +23,8 @@ figment.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["net"] }
+bs58.workspace = true
+solana-signature.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
@@ -36,6 +38,9 @@ warden-rail-paypal = { workspace = true, optional = true }
 warden-rail-near = { workspace = true, optional = true }
 warden-rail-bch = { workspace = true, optional = true }
 warden-rail-concordium = { workspace = true, optional = true }
+
+[dev-dependencies]
+solana-sdk.workspace = true
 
 [lints]
 workspace = true

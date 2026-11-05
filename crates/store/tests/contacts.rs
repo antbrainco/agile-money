@@ -95,3 +95,60 @@ async fn a_card_closes_once(pool: PgPool) {
     assert_eq!(store.close_card(approval).await.unwrap(), Some(42));
     assert_eq!(store.close_card(approval).await.unwrap(), None);
 }
+
+#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+async fn an_enrolled_code_is_stored_once(pool: PgPool) {
+    let store = PgStore::from_pool(pool);
+    let agent = AgentId::new(Uuid::from_u128(1));
+    assert_eq!(store.owner_code(agent).await.unwrap(), None);
+    assert!(store.save_owner_code(agent, "FIRST").await.unwrap());
+    assert!(!store.save_owner_code(agent, "SECOND").await.unwrap());
+    assert_eq!(
+        store.owner_code(agent).await.unwrap().as_deref(),
+        Some("FIRST")
+    );
+}
+
+#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+async fn wallets_link_up_to_the_limit_and_unlink(pool: PgPool) {
+    let store = PgStore::from_pool(pool);
+    let agent = AgentId::new(Uuid::from_u128(1));
+    for n in 0..warden_store::MAX_WALLETS {
+        assert!(
+            store
+                .link_wallet(agent, &format!("W{n}"), "phone")
+                .await
+                .unwrap()
+        );
+    }
+    assert!(
+        !store
+            .link_wallet(agent, "WX", "one too many")
+            .await
+            .unwrap()
+    );
+    // Renaming a linked wallet isn't a new one.
+    assert!(store.link_wallet(agent, "W0", "laptop").await.unwrap());
+    let wallets = store.owner_wallets(agent).await.unwrap();
+    assert_eq!(wallets.len() as i64, warden_store::MAX_WALLETS);
+    assert_eq!(wallets[0].label, "laptop");
+    assert!(store.unlink_wallet(agent, "W0").await.unwrap());
+    assert!(!store.unlink_wallet(agent, "W0").await.unwrap());
+}
+
+#[sqlx::test(migrator = "warden_store::MIGRATOR")]
+async fn telegram_link_is_replaced(pool: PgPool) {
+    let store = PgStore::from_pool(pool);
+    let agent = AgentId::new(Uuid::from_u128(1));
+    assert_eq!(store.owner_telegram(agent).await.unwrap(), None);
+    store.link_telegram(agent, "Ada", None).await.unwrap();
+    store
+        .link_telegram(agent, "Ada L", Some("ada"))
+        .await
+        .unwrap();
+    let linked = store.owner_telegram(agent).await.unwrap().unwrap();
+    assert_eq!(
+        (linked.name.as_str(), linked.username.as_deref()),
+        ("Ada L", Some("ada"))
+    );
+}

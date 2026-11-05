@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM owner_wallets WHERE agent_id = $1 AND address = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "577f8fb3529c015e288dc9712c86f70086fe38bbda0509d68cd8fee50d19ad83"
+}

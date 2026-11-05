@@ -38,6 +38,8 @@ pub struct App {
     pub turn: ChatTurn,
     pub history: Mutex<Vec<Turn>>,
     pub cards: Cards,
+    /// Wallet sign-in challenges and the Telegram link from the dashboard.
+    pub profile: crate::profile::Linking,
 }
 
 /// Held while the agent answers the owner. Payment notices wait for it, so a
@@ -258,6 +260,29 @@ fn command(text: &str) -> &str {
     word.split_once('@').map_or(word, |(cmd, _)| cmd)
 }
 
+/// `/start <token>` from the dashboard's Profile link, in the owner chat.
+async fn link_telegram(app: &App, msg: &Message, token: &str) -> String {
+    if !app.profile.redeem(token, jiff::Timestamp::now()) {
+        return "That link has expired. Open Profile in the dashboard for a new one.".into();
+    }
+    let (name, username) = msg.from.as_ref().map_or_else(
+        || (msg.chat.first_name().unwrap_or("Owner").to_owned(), None),
+        |u| (u.full_name(), u.username.clone()),
+    );
+    let agent = crate::setup::agent_id(app.owner.0);
+    match app
+        .store
+        .link_telegram(agent, &name, username.as_deref())
+        .await
+    {
+        Ok(()) => {
+            tracing::info!("Telegram confirmed from the dashboard link");
+            "Linked. Your dashboard's Profile now shows this account.".into()
+        }
+        Err(e) => format!("Couldn't save the link: {e}"),
+    }
+}
+
 async fn balances(app: &App) -> String {
     let mut lines = vec![format!("Wallet {}", app.rail.address())];
     if let Some(vault) = app.rail.vault() {
@@ -333,7 +358,7 @@ async fn forget(bot: &Bot, msg: &Message) {
 pub async fn on_message(bot: Bot, msg: Message, app: Arc<App>) -> ResponseResult<()> {
     if msg.chat.id != app.owner {
         // Lets a new owner find their chat id; strangers learn nothing else.
-        if msg.text() == Some("/start") {
+        if msg.text().map(command) == Some("/start") {
             bot.send_message(
                 msg.chat.id,
                 format!(
@@ -350,6 +375,7 @@ pub async fn on_message(bot: Bot, msg: Message, app: Arc<App>) -> ResponseResult
     };
     let rest = args(text);
     let reply = match command(text) {
+        "/start" if !rest.is_empty() => link_telegram(&app, &msg, rest).await,
         "/start" | "/help" => HELP.to_owned(),
         "/contacts" => contact_list(&app).await,
         "/balance" => balances(&app).await,

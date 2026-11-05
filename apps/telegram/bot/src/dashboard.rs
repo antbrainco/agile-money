@@ -30,6 +30,8 @@ use warden_store::{Contact, ContactSource, ContactState, PolicySource, PolicyVer
 use crate::setup;
 use crate::telegram::{self, App};
 
+mod account;
+
 /// `[dashboard]`. On when `DASHBOARD_TOKEN` (or `WARDEN_DASHBOARD__TOKEN`) is set.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DashboardConfig {
@@ -74,6 +76,9 @@ pub async fn serve(config: &DashboardConfig, app: Arc<App>, bot: Bot) -> anyhow:
         .route("/api/pause", post(pause))
         .route("/api/contacts", get(contacts).post(add_contact))
         .route("/api/contacts/{id}/{action}", post(change_contact))
+        .route("/api/codes/setup", post(codes_setup))
+        .route("/api/codes/confirm", post(codes_confirm))
+        .merge(account::routes())
         .layer(middleware::from_fn_with_state(api.clone(), authorize))
         .with_state(api);
     let listener = tokio::net::TcpListener::bind(config.listen).await?;
@@ -104,7 +109,7 @@ async fn authorize(
 }
 
 /// Compares in time independent of where the inputs differ.
-fn same(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn same(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
@@ -627,22 +632,7 @@ struct SignIn {
 /// once codes are set up, and tells Telegram, so a stolen password shows.
 async fn sign_in(State(api): State<Api>, Json(req): Json<SignIn>) -> Reply<serde_json::Value> {
     let app = &api.app;
-    let guard = app.contacts.guard();
-    if guard.enabled() {
-        let code = req
-            .code
-            .as_deref()
-            .filter(|c| !c.trim().is_empty())
-            .ok_or_else(|| {
-                failure(
-                    StatusCode::UNAUTHORIZED,
-                    "Enter the code from your authenticator app.",
-                )
-            })?;
-        guard
-            .check(code, Timestamp::now())
-            .map_err(|e| failure(StatusCode::UNAUTHORIZED, e.to_string()))?;
-    }
+    check_code(app, req.code.as_deref())?;
     tracing::info!("dashboard signed in");
     app.contacts
         .notify(
@@ -651,6 +641,23 @@ async fn sign_in(State(api): State<Api>, Json(req): Json<SignIn>) -> Reply<serde
         )
         .await;
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// Once codes are set up, `code` must be a fresh one from the owner's app.
+fn check_code(app: &App, code: Option<&str>) -> Result<(), Failure> {
+    let guard = app.contacts.guard();
+    if !guard.enabled() {
+        return Ok(());
+    }
+    let code = code.filter(|c| !c.trim().is_empty()).ok_or_else(|| {
+        failure(
+            StatusCode::UNAUTHORIZED,
+            "Enter the code from your authenticator app.",
+        )
+    })?;
+    guard
+        .check(code, Timestamp::now())
+        .map_err(|e| failure(StatusCode::UNAUTHORIZED, e.to_string()))
 }
 
 #[derive(Deserialize)]
@@ -869,4 +876,75 @@ mod tests {
         assert!(!same(b"abc", b"abcd"));
         assert!(!same(b"", b"a"));
     }
+}
+
+#[derive(Serialize)]
+struct CodeSetup {
+    /// otpauth URL, as the QR code shows it.
+    url: String,
+    /// The same secret in base32, for typing in by hand.
+    key: String,
+    /// The QR code as an SVG document.
+    qr: String,
+}
+
+/// Starts enrolling the owner's authenticator app. Only while codes are off:
+/// before then the password alone already loosens everything, so this gives a
+/// signed-in session nothing new, and once on, a device is never replaced here.
+async fn codes_setup(State(api): State<Api>) -> Reply<CodeSetup> {
+    let enrolment = api
+        .app
+        .contacts
+        .guard()
+        .begin(Timestamp::now())
+        .map_err(|e| failure(StatusCode::CONFLICT, e.to_string()))?;
+    let qr = qrcode::QrCode::new(enrolment.url.as_bytes())
+        .map_err(internal)?
+        .render::<qrcode::render::svg::Color<'_>>()
+        .min_dimensions(240, 240)
+        .quiet_zone(true)
+        .build();
+    tracing::info!("authenticator enrolment started from the dashboard");
+    Ok(Json(CodeSetup {
+        url: enrolment.url,
+        key: enrolment.key.expose_secret().to_owned(),
+        qr,
+    }))
+}
+
+#[derive(Deserialize)]
+struct CodeConfirm {
+    code: String,
+}
+
+/// Checks the first code from the new app, stores the secret and turns codes on.
+async fn codes_confirm(State(api): State<Api>, Json(req): Json<CodeConfirm>) -> Reply<Overview> {
+    let app = &api.app;
+    let guard = app.contacts.guard();
+    let enrolled = guard
+        .finish(&req.code, Timestamp::now())
+        .map_err(|e| failure(StatusCode::FORBIDDEN, e.to_string()))?;
+    let agent = setup::agent_id(app.owner.0);
+    let saved = app
+        .store
+        .save_owner_code(agent, enrolled.key.expose_secret())
+        .await
+        .map_err(internal)?;
+    if !saved {
+        return Err(failure(
+            StatusCode::CONFLICT,
+            crate::security::EnrolError::AlreadySetUp.to_string(),
+        ));
+    }
+    guard.install(enrolled);
+    tracing::info!("authenticator codes turned on from the dashboard");
+    app.contacts
+        .notify(
+            "Authenticator codes were turned on from the dashboard. From now on, adding contacts, \
+             raising limits and resuming need a code. If that wasn't you, send /pause."
+                .into(),
+            None,
+        )
+        .await;
+    overview(State(api)).await
 }

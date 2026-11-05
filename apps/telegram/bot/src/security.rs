@@ -3,7 +3,7 @@
 //! changed contact, higher limits, resuming after a pause) also needs a code.
 //! Tightening (pausing, removing, lowering) never does.
 
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 
 use jiff::{SignedDuration, Timestamp};
 use secrecy::{ExposeSecret, SecretString};
@@ -13,12 +13,17 @@ use totp_rs::{Builder, Secret, Totp};
 /// Wrong codes allowed within `LOCKOUT` before codes are refused for a while.
 const MAX_FAILURES: usize = 5;
 const LOCKOUT: SignedDuration = SignedDuration::from_mins(15);
+/// How long a dashboard enrolment waits for its first code.
+const ENROL_WINDOW: SignedDuration = SignedDuration::from_mins(10);
+/// Wrong first codes before an enrolment is thrown away.
+const ENROL_TRIES: u8 = 5;
 
 /// `[security]`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SecurityConfig {
-    /// Base32, from `TOTP_SECRET` only; `--example totp_setup` makes one.
-    /// Without it nothing can be loosened from chat or the dashboard.
+    /// Base32, from `TOTP_SECRET`; `--example totp_setup` makes one. Without
+    /// it the owner can enrol from the dashboard, which stores the secret in
+    /// Postgres. Until then nothing can be loosened with a code.
     pub totp_secret: Option<SecretString>,
     /// How long a confirmed contact waits before it can be paid, so a
     /// hijacked session can't add a payee and pay it at once.
@@ -75,7 +80,7 @@ impl std::fmt::Display for CodeError {
         match self {
             Self::NotSetUp => f.write_str(
                 "Authenticator codes aren't set up, so this can't be done from here. \
-                 Run `cargo run -p warden-telegram-bot --example totp_setup` on the server.",
+                 Set them up under Security in the dashboard.",
             ),
             Self::Locked { until } => write!(
                 f,
@@ -94,10 +99,54 @@ struct Attempts {
     failures: Vec<Timestamp>,
 }
 
+/// Why a dashboard enrolment didn't go through.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnrolError {
+    AlreadySetUp,
+    /// Nothing started, it timed out, or too many wrong codes ended it.
+    NotStarted,
+    Wrong,
+}
+
+impl std::fmt::Display for EnrolError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::AlreadySetUp => {
+                "Codes are already set up. To move to a new device, remove the old secret on the server first."
+            }
+            Self::NotStarted => "That setup expired. Start again to get a new QR code.",
+            Self::Wrong => {
+                "That code doesn't match. Check the clock on your phone and try the next one."
+            }
+        })
+    }
+}
+
+/// What the authenticator app needs: the otpauth URL (the QR code) and the
+/// same key for typing in by hand.
+pub struct Enrolment {
+    pub url: String,
+    pub key: SecretString,
+}
+
+/// A confirmed enrolment, to store before `install` turns codes on.
+pub struct Enrolled {
+    pub key: SecretString,
+    totp: Totp,
+    step: u64,
+}
+
+struct Pending {
+    totp: Totp,
+    expires: Timestamp,
+    tries: u8,
+}
+
 /// Checks codes, refuses replays, and locks out after repeated failures.
 pub struct Guard {
-    totp: Option<Totp>,
+    totp: RwLock<Option<Totp>>,
     attempts: Mutex<Attempts>,
+    pending: Mutex<Option<Pending>>,
 }
 
 impl std::fmt::Debug for Guard {
@@ -118,17 +167,86 @@ impl Guard {
             })
             .transpose()?;
         Ok(Self {
-            totp,
+            totp: RwLock::new(totp),
             attempts: Mutex::default(),
+            pending: Mutex::default(),
         })
     }
 
     pub fn enabled(&self) -> bool {
-        self.totp.is_some()
+        self.totp
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some()
+    }
+
+    /// Starts enrolling a new authenticator, replacing any unfinished start.
+    /// Only while codes are off: an enrolled device is never replaced here.
+    pub fn begin(&self, now: Timestamp) -> Result<Enrolment, EnrolError> {
+        if self.enabled() {
+            return Err(EnrolError::AlreadySetUp);
+        }
+        let secret = Secret::generate();
+        let key = SecretString::from(secret.to_base32());
+        let totp = totp(secret).map_err(|_| EnrolError::NotStarted)?;
+        let url = totp.to_url().map_err(|_| EnrolError::NotStarted)?;
+        *self.pending.lock().unwrap_or_else(|e| e.into_inner()) = Some(Pending {
+            totp,
+            expires: now + ENROL_WINDOW,
+            tries: 0,
+        });
+        Ok(Enrolment { url, key })
+    }
+
+    /// Checks the first code from the new authenticator. On a match the
+    /// enrolment is handed back (and forgotten here) for the caller to store.
+    pub fn finish(&self, code: &str, now: Timestamp) -> Result<Enrolled, EnrolError> {
+        if self.enabled() {
+            return Err(EnrolError::AlreadySetUp);
+        }
+        let mut slot = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        let pending = slot
+            .as_mut()
+            .filter(|p| p.expires > now)
+            .ok_or(EnrolError::NotStarted)?;
+        let code: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+        let time = u64::try_from(now.as_second()).unwrap_or_default();
+        let step = (code.len() == 6 && code.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| pending.totp.check(&code, time))
+            .flatten();
+        let Some(step) = step else {
+            pending.tries += 1;
+            if pending.tries >= ENROL_TRIES {
+                *slot = None;
+                tracing::warn!("enrolment dropped after wrong codes");
+                return Err(EnrolError::NotStarted);
+            }
+            return Err(EnrolError::Wrong);
+        };
+        let Some(Pending { totp, .. }) = slot.take() else {
+            return Err(EnrolError::NotStarted);
+        };
+        Ok(Enrolled {
+            key: SecretString::from(totp.secret().to_base32()),
+            totp,
+            step,
+        })
+    }
+
+    /// Turns codes on with a stored enrolment. Its first code can't be used again.
+    pub fn install(&self, enrolled: Enrolled) {
+        let mut totp = self.totp.write().unwrap_or_else(|e| e.into_inner());
+        if totp.is_none() {
+            *totp = Some(enrolled.totp);
+            let mut attempts = self.attempts.lock().unwrap_or_else(|e| e.into_inner());
+            attempts.last_step = Some(enrolled.step);
+            attempts.failures.clear();
+        }
     }
 
     pub fn check(&self, code: &str, now: Timestamp) -> Result<(), CodeError> {
-        let totp = self.totp.as_ref().ok_or(CodeError::NotSetUp)?;
+        let totp = self.totp.read().unwrap_or_else(|e| e.into_inner());
+        let totp = totp.as_ref().ok_or(CodeError::NotSetUp)?;
         let mut attempts = self.attempts.lock().unwrap_or_else(|e| e.into_inner());
         attempts.failures.retain(|t| *t + LOCKOUT > now);
         if attempts.failures.len() >= MAX_FAILURES {
@@ -213,6 +331,76 @@ mod tests {
             guard.check("123456", Timestamp::now()),
             Err(CodeError::NotSetUp)
         );
+    }
+
+    /// The app's side of an enrolment: the TOTP built from the shown key.
+    fn phone(enrolment: &Enrolment) -> Totp {
+        totp(Secret::try_from_base32(enrolment.key.expose_secret()).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn enrolling_turns_codes_on_and_burns_the_first_code() {
+        let guard = Guard::new(None).unwrap();
+        let now = Timestamp::from_second(1_800_000_000).unwrap();
+        let enrolment = guard.begin(now).unwrap();
+        assert!(enrolment.url.starts_with("otpauth://totp/Tilly:owner?"));
+        let app = phone(&enrolment);
+        let first = code(&app, now);
+        let enrolled = guard.finish(&first, now).unwrap();
+        assert_eq!(enrolled.key.expose_secret(), enrolment.key.expose_secret());
+        assert!(!guard.enabled(), "nothing changes until it is stored");
+        guard.install(enrolled);
+        assert!(guard.enabled());
+        assert_eq!(guard.check(&first, now), Err(CodeError::Reused));
+        let later = now + SignedDuration::from_secs(30);
+        assert_eq!(guard.check(&code(&app, later), later), Ok(()));
+        assert!(matches!(guard.begin(later), Err(EnrolError::AlreadySetUp)));
+    }
+
+    #[test]
+    fn an_enrolled_secret_is_never_replaced() {
+        let (guard, _) = guard();
+        assert!(matches!(
+            guard.begin(Timestamp::now()),
+            Err(EnrolError::AlreadySetUp)
+        ));
+    }
+
+    #[test]
+    fn enrolments_expire_and_end_after_wrong_codes() {
+        let guard = Guard::new(None).unwrap();
+        let now = Timestamp::from_second(1_800_000_000).unwrap();
+        assert!(matches!(
+            guard.finish("123456", now),
+            Err(EnrolError::NotStarted)
+        ));
+
+        let app = phone(&guard.begin(now).unwrap());
+        let late = now + ENROL_WINDOW + SignedDuration::from_secs(1);
+        assert!(matches!(
+            guard.finish(&code(&app, late), late),
+            Err(EnrolError::NotStarted)
+        ));
+
+        let app = phone(&guard.begin(now).unwrap());
+        let right = code(&app, now);
+        let wrong = if right == "000000" {
+            "111111"
+        } else {
+            "000000"
+        };
+        for _ in 1..ENROL_TRIES {
+            assert!(matches!(guard.finish(wrong, now), Err(EnrolError::Wrong)));
+        }
+        assert!(matches!(
+            guard.finish(wrong, now),
+            Err(EnrolError::NotStarted)
+        ));
+        assert!(matches!(
+            guard.finish(&right, now),
+            Err(EnrolError::NotStarted)
+        ));
+        assert!(!guard.enabled());
     }
 
     #[test]
