@@ -58,4 +58,30 @@ jobs:
           cache: npm
           cache-dependency-path: apps/dashboard/package-lock.json
       - run: npm ci
+      - run: npm run lint
+      - run: npm test
       - run: npm run build
+
+  vault:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/sol/vault
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts/sol/vault
+      - name: Install the Solana CLI (for cargo-build-sbf)
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v4.3.2/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets
+      # The integration tests load the built program into litesvm.
+      - run: cargo-build-sbf
+      - run: cargo test

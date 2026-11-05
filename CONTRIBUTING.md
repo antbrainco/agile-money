@@ -30,7 +30,13 @@ cargo sqlx prepare --workspace -- --all-targets --all-features
 For the dashboard:
 
 ```bash
-cd apps/dashboard && npm ci && npm run build
+cd apps/dashboard && npm ci && npm run lint && npm test && npm run build
+```
+
+For the vault program, with the Solana CLI installed:
+
+```bash
+cd contracts/sol/vault && cargo fmt --check && cargo clippy --all-targets && cargo-build-sbf && cargo test
 ```
 
 ## How the code is meant to stay
