@@ -4,6 +4,14 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+# Unmaintained, with no maintained release to move to, and pulled in by
+# dependencies rather than used directly. Revisit when those dependencies change.
+ignore = [
+    # bincode 1: via the Solana RPC client (solana-account and friends).
+    { id = "RUSTSEC-2025-0141", reason = "transitive via solana-rpc-client; no upgrade available" },
+    # proc-macro-error2: via teloxide -> aquamarine, a doc-only proc macro.
+    { id = "RUSTSEC-2026-0173", reason = "transitive via teloxide; no upgrade available" },
+]
 
 [licenses]
 version = 2
@@ -17,6 +25,8 @@ allow = [
     "Unicode-3.0",
     "Zlib",
     "CDLA-Permissive-2.0",
+    # File-level copyleft only; used unmodified (colored, via teloxide).
+    "MPL-2.0",
 ]
 
 [bans]
