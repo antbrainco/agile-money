@@ -53,7 +53,54 @@ sqlx migrate run
 cargo test --workspace --all-features
 ```
 
-Then [run it on Telegram](#run-it-on-telegram-solana-devnet).
+Then [run it on Telegram](#run-it-on-telegram-solana-devnet), or try only the
+[PayPal flow](#try-the-paypal-flow).
+
+## Try the PayPal flow
+
+The shortest path to seeing the agent take a payment by PayPal, all in the PayPal sandbox. It
+takes about 15 minutes and needs no crypto: the bot wants a Solana key to start, but it never
+has to be funded for this.
+
+You need the [quick start](#quick-start) tools, a Telegram account, and:
+
+- **A PayPal sandbox app.** At https://developer.paypal.com, sign in and open
+  *Apps & Credentials* (Sandbox), then create a REST app. Copy its client ID and secret.
+- **A sandbox buyer.** Under *Testing Tools → Sandbox Accounts*, PayPal creates a Personal
+  (buyer) account for you. Note its email and password: you pay the checkout link with it.
+- **A Telegram bot.** Message [@BotFather](https://t.me/BotFather), send `/newbot`, and copy
+  the token.
+- **A model key**, e.g. a DeepSeek API key, or another of the [supported providers](#llm-providers).
+
+Then:
+
+1. Start Postgres and make a devnet key (it prints a line for `.env`; skip the faucet):
+
+   ```bash
+   cp .env.example .env
+   docker compose up -d --wait postgres
+   cargo run -p agile-money-rail-sol --example keygen
+   ```
+
+2. In `.env`, fill in `TELOXIDE_TOKEN`, `DEEPSEEK_API_KEY`, the `AGILE_MONEY_RAIL__SOL__KEYPAIR`
+   line from step 1, and uncomment the two PayPal lines with your sandbox client ID and
+   secret.
+3. Start the bot and send it `/start` in Telegram. It replies with your chat id; set it as
+   `AGILE_MONEY_TELEGRAM__OWNER_CHAT_ID` in `.env`, then stop the bot and start it again. The
+   log should say `PayPal requests on`.
+
+   ```bash
+   set -a; . ./.env; set +a
+   cargo run -p agile-money-telegram-bot
+   ```
+
+4. Ask the bot: **"request 20 USD from Dana for the logo"**. It replies with a PayPal checkout
+   link and a QR code.
+5. Open the link in a browser and pay with the sandbox **buyer** account (or a sandbox card).
+6. Within about 10 seconds the bot captures the order and tells you in Telegram that Dana has
+   paid. If you cancel the checkout instead, or it expires, the bot tells you it was cancelled.
+
+To see the request in the dashboard's history as well, follow step 8 of the next section.
 
 ## Run it on Telegram (Solana devnet)
 
