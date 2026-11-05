@@ -1,4 +1,5 @@
-//! Layered config: `agile-money.toml`, then `AGILE_MONEY_*` env vars (`__` nests), then
+//! Layered config: `agile-money.toml`, then the optional `agile-money.local.toml`, then
+//! `AGILE_MONEY_*` env vars (`__` nests), then
 //! the conventional `DATABASE_URL`, `TELOXIDE_TOKEN`, `TUNNEL_URL` and
 //! `TELEGRAM_WEBHOOK_SECRET`, `DASHBOARD_TOKEN` and `TOTP_SECRET`.
 
@@ -181,6 +182,8 @@ impl Config {
         let _ = dotenvy::dotenv();
         let config: Self = Figment::new()
             .merge(Toml::file("agile-money.toml"))
+            // Your own deployment: git-ignored, optional, same shape.
+            .merge(Toml::file("agile-money.local.toml"))
             .merge(Env::prefixed("AGILE_MONEY_").split("__"))
             .merge(
                 Env::raw()
@@ -349,7 +352,7 @@ mod tests {
             [http]
             max_retries = 4
             [extra_body]
-            metadata = { user_id = "tilly" }
+            metadata = { user_id = "owner" }
         "#;
         let agent: AgentConfig = Figment::from(Toml::string(toml)).extract().unwrap();
         assert_eq!(agent.step_limit, 5);
@@ -359,7 +362,7 @@ mod tests {
         assert_eq!(llm.http.max_retries, 4);
         assert_eq!(llm.http.retry_base_ms, 500, "defaults fill the rest");
         assert!(llm.stream);
-        assert_eq!(llm.extra_body["metadata"]["user_id"], "tilly");
+        assert_eq!(llm.extra_body["metadata"]["user_id"], "owner");
         assert_eq!(
             llm.base_url().unwrap().as_str(),
             "https://gateway.ai.cloudflare.com/v1/acct/default/anthropic/"
@@ -367,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn agile_money_toml_webhook_resolves_to_the_tunnel() {
+    fn agile_money_toml_polls_until_a_url_is_set() {
         #[derive(Deserialize)]
         struct File {
             telegram: Section,
@@ -382,7 +385,15 @@ mod tests {
         )))
         .extract()
         .unwrap();
-        let hook = crate::webhook::Webhook::resolve(file.telegram.webhook.as_ref())
+        let mut webhook = file.telegram.webhook.unwrap();
+        assert!(
+            crate::webhook::Webhook::resolve(Some(&webhook))
+                .unwrap()
+                .is_none(),
+            "the shipped file long-polls"
+        );
+        webhook.url = Some("https://bot.example.com".parse().unwrap());
+        let hook = crate::webhook::Webhook::resolve(Some(&webhook))
             .unwrap()
             .unwrap();
         assert_eq!(hook.endpoint.as_str(), "https://bot.example.com/telegram");

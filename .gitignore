@@ -5,3 +5,7 @@ node_modules/
 .next/
 deploy/bot.env
 deploy/tunnel.json
+
+# Your own deployment, layered over the shared templates.
+agile-money.local.toml
+deploy/cloudflared.yml

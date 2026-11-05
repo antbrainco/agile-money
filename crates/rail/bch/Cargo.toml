@@ -1,6 +1,6 @@
 [package]
 name = "agile-money-rail-bch"
-description = "Bitcoin Cash rail: a thin HTTP client to the services/bch/signer sidecar."
+description = "Bitcoin Cash rail: not implemented yet."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

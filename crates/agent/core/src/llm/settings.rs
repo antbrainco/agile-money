@@ -400,7 +400,7 @@ mod tests {
     fn gateway(token: Option<&str>) -> GatewaySettings {
         GatewaySettings {
             account_id: "acct".into(),
-            gateway_id: "tilly".into(),
+            gateway_id: "my-gateway".into(),
             token: token.map(|t| SecretString::from(t.to_owned())),
         }
     }
@@ -411,13 +411,13 @@ mod tests {
         settings.gateway = Some(gateway(None));
         assert_eq!(
             settings.base_url().unwrap().as_str(),
-            "https://gateway.ai.cloudflare.com/v1/acct/tilly/deepseek/"
+            "https://gateway.ai.cloudflare.com/v1/acct/my-gateway/deepseek/"
         );
         settings.provider = Some(Provider::Claude);
         let url = settings.base_url().unwrap().join("v1/messages").unwrap();
         assert_eq!(
             url.as_str(),
-            "https://gateway.ai.cloudflare.com/v1/acct/tilly/anthropic/v1/messages"
+            "https://gateway.ai.cloudflare.com/v1/acct/my-gateway/anthropic/v1/messages"
         );
         settings.provider = Some(Provider::Compatible);
         assert!(settings.base_url().unwrap().path().ends_with("/compat/"));

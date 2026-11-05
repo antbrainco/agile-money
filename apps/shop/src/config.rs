@@ -1,4 +1,4 @@
-//! Layered config: `agile-money.toml`, then `AGILE_MONEY_*` env vars (`__` nests), then `DATABASE_URL`.
+//! Layered config: `agile-money.toml`, then `agile-money.local.toml`, then `AGILE_MONEY_*` env vars (`__` nests), then `DATABASE_URL`.
 
 use agile_money_store::DbConfig;
 use figment::Figment;
@@ -16,6 +16,8 @@ impl Config {
         let _ = dotenvy::dotenv();
         let config = Figment::new()
             .merge(Toml::file("agile-money.toml"))
+            // Your own deployment: git-ignored, optional, same shape.
+            .merge(Toml::file("agile-money.local.toml"))
             .merge(Env::prefixed("AGILE_MONEY_").split("__"))
             .merge(
                 Env::raw()

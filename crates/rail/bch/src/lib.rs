@@ -1,4 +1,4 @@
-//! Bitcoin Cash rail: a thin HTTP client to the services/bch/signer sidecar.
+//! Bitcoin Cash rail: not implemented yet.
 //! Will implement [`agile_money_domain::ports::Rail`]; live network tests go behind the `live` feature.
 
 use agile_money_domain::RailId;

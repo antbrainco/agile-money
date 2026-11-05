@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "tilly-dashboard",
+  "name": "agile-money-dashboard",
   "main": "worker/index.ts",
   "compatibility_date": "2026-10-28",
   "assets": {
@@ -8,11 +8,8 @@
     // The Worker handles sign-in and the API proxy; everything else is the app.
     "run_worker_first": ["/api/*", "/auth/*"]
   },
-  "vars": {
-    // The bot's dashboard API, through the tunnel. Local dev overrides it in .dev.vars.
-    "BOT_API_URL": "https://bot.example.com"
-  },
-  // Secrets (wrangler secret put): DASHBOARD_TOKEN, the bot's API token, and
+  // Set with `wrangler secret put` (locally, in .dev.vars): BOT_API_URL, the bot's
+  // dashboard API through your tunnel; DASHBOARD_TOKEN, the bot's API token; and
   // DASHBOARD_PASSWORD, the owner's sign-in.
   // Sign-in attempts: 5 a minute from one address, 20 a minute overall.
   "ratelimits": [

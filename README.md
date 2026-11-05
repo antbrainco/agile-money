@@ -57,7 +57,7 @@ Every step is an event in Postgres, so a crash mid-payment resumes instead of pa
 | `apps/dashboard` | (npm) | Vite + React on a Cloudflare Worker |
 | `contracts/sol/vault` | `tilly-vault` | Solana program that bounds what the bot can pay out |
 
-`apps/dashboard`, `contracts/*` and `services/*` build with their own toolchains and
+`apps/dashboard` and `contracts/sol/vault` build with their own toolchains and
 sit outside the Cargo workspace. A few names still say `tilly`, the project's first name:
 the vault program, its account tag and some derived ids. Changing them would orphan data
 that already exists, on chain or in the database.
@@ -75,6 +75,19 @@ cargo test --workspace --all-features
 ```
 
 Then follow [Run the Telegram demo](#run-the-telegram-demo-solana-devnet) to talk to it.
+
+## Configuration
+
+Settings are layered, each overriding the last:
+
+1. `agile-money.toml`: shared defaults and documented examples. Keep it generic.
+2. `agile-money.local.toml`: your own deployment, git-ignored and optional, same shape. Put
+   your webhook URL, model endpoint, vault and contacts here.
+3. `AGILE_MONEY_*` environment variables, with `__` for nesting, e.g.
+   `AGILE_MONEY_TELEGRAM__OWNER_CHAT_ID`. Also `DATABASE_URL`, `TELOXIDE_TOKEN`, `TUNNEL_URL`,
+   `TELEGRAM_WEBHOOK_SECRET`, `DASHBOARD_TOKEN` and `TOTP_SECRET`.
+
+Secrets only ever come from the environment (`.env` locally), never from either file.
 
 ## Develop
 
@@ -96,9 +109,9 @@ Apps build one rail per Cargo feature, e.g. `cargo run -p agile-money-shop --no-
 ## Run the Telegram demo (Solana devnet)
 
 1. Create a bot with @BotFather and put its token in `.env` as `TELOXIDE_TOKEN`.
-2. `agile-money.toml` uses DeepSeek V4 Flash on Cloudflare Workers AI. Put a Cloudflare API token
-   with Workers AI permission in `.env` as `AGILE_MONEY_AGENT__API_KEY`. For other providers, see
-   [Model providers](#model-providers).
+2. Give it a model: put `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in `.env`,
+   and the provider is picked from whichever is set. `agile-money.toml` also shows how to use
+   DeepSeek V4 Flash on Cloudflare Workers AI. See [Model providers](#model-providers).
 3. Make a devnet wallet and paste the printed line into `.env`. Then fund the address at
    https://faucet.solana.com:
 
@@ -108,8 +121,8 @@ Apps build one rail per Cargo feature, e.g. `cargo run -p agile-money-shop --no-
 
 4. Start the bot and send it `/start`. It replies with your chat id. Set that id as
    `AGILE_MONEY_TELEGRAM__OWNER_CHAT_ID` and restart.
-5. Edit `[[contacts]]` and the per-asset limits in `[policy.sol]` and `[policy.usdc]` in
-   `agile-money.toml`, then chat: "pay Bob 0.01 SOL for lunch" or "pay Acme Design 5 USDC".
+5. Add `[[contacts]]` in `agile-money.local.toml` (see [Configuration](#configuration)) and
+   adjust the per-asset limits in `[policy.sol]` and `[policy.usdc]`, then chat: "pay Bob 0.01 SOL for lunch" or "pay Acme Design 5 USDC".
    Payments above `approval_above` wait for your Approve tap. Each confirmed payment links to the
    devnet explorer. For USDC, get devnet USDC for the wallet at https://faucet.circle.com
    (Solana Devnet). Drop `[policy.usdc]` to turn USDC off; an asset without limits can't be paid.
@@ -167,7 +180,9 @@ supports neither.
 1. Create a Neon project and copy its direct connection string.
 2. On the server, clone the repo and go to `deploy/`. Copy `bot.env.example` to `bot.env`,
    fill it in, then run `chmod 600 bot.env`.
-3. Copy the tunnel's credentials file, `~/.cloudflared/<tunnel-id>.json`, to `deploy/tunnel.json`.
+3. Copy `cloudflared.example.yml` to `cloudflared.yml` and fill in your tunnel id and
+   hostname. Copy the tunnel's credentials file, `~/.cloudflared/<tunnel-id>.json`, to
+   `deploy/tunnel.json`.
 4. Stop the laptop's tunnel and bot, then start the server's:
 
    ```bash
@@ -175,9 +190,9 @@ supports neither.
    docker compose logs -f bot
    ```
 
-Migrations run on start. The image bakes in `agile-money.toml` and nothing secret; `AGILE_MONEY_*`
-variables in `bot.env` override it. The wallet key comes from env, which is fine for devnet;
-with real funds, keep keys in a KMS or HSM.
+Migrations run on start. The image bakes in `agile-money.toml` (and `agile-money.local.toml`
+when present) and nothing secret; `AGILE_MONEY_*` variables in `bot.env` override them. The
+wallet key comes from env, which is fine for devnet; with real funds, keep keys in a KMS or HSM.
 
 ## Model providers
 
@@ -204,6 +219,17 @@ With `provider = "compatible"`, the gateway's `compat` endpoint is used; give mo
 The client lives in `crates/agent/core/src/llm`. A `RoundTripper` stack (headers, retries,
 tracing) carries the HTTP; a `Wire` per API format builds bodies and decodes replies, whole or
 streamed over SSE.
+
+## Status
+
+Experimental. It runs on Solana devnet and PayPal sandbox by default, and mainnet needs an
+explicit opt-in per rail. Neither the bot nor the vault program has been audited; don't
+point it at money you can't afford to lose.
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Please report vulnerabilities privately, as described
+in [SECURITY.md](SECURITY.md), not in public issues.
 
 ## Licence
 

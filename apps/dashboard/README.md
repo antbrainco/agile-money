@@ -30,9 +30,8 @@ npm run dev                      # http://localhost:5173
 
 ## Deploy
 
-The Worker reaches the bot through the tunnel, so first route `/api/` on the
-tunnel's hostname to the API listener in `~/.cloudflared/tilly-dev.yml`, above the
-catch-all:
+The Worker reaches the bot through your tunnel, so first route `/api/` on the
+tunnel's hostname to the bot's API listener, above the catch-all:
 
 ```yaml
   - hostname: bot.example.com
@@ -40,12 +39,12 @@ catch-all:
     service: http://127.0.0.1:8787
 ```
 
-Then:
+Then set the Worker's secrets and deploy. `BOT_API_URL` is the tunnel's base URL,
+e.g. `https://bot.example.com`:
 
 ```bash
+npx wrangler secret put BOT_API_URL
 npx wrangler secret put DASHBOARD_TOKEN
 npx wrangler secret put DASHBOARD_PASSWORD
 npm run deploy
 ```
-
-`BOT_API_URL` in `wrangler.jsonc` points at the tunnel.

@@ -24,7 +24,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /usr/local/bin/agile-money-telegram-bot /usr/local/bin/
 WORKDIR /app
-# Non-secret config; AGILE_MONEY_* env vars override it.
-COPY agile-money.toml ./
+# Non-secret config, plus agile-money.local.toml when present; AGILE_MONEY_* env vars override both.
+COPY agile-money*.toml ./
 USER 10001
 CMD ["agile-money-telegram-bot"]

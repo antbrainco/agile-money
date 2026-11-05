@@ -1,4 +1,4 @@
-# The same tunnel as ~/.cloudflared/tilly-dev.yml, pointed at the bot container.
+# Copy to cloudflared.yml. Your Cloudflare Tunnel, pointed at the bot container.
 # tunnel.json is that tunnel's credentials file, copied to the server.
 tunnel: <tunnel-id>
 credentials-file: /etc/cloudflared/tunnel.json

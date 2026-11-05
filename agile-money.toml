@@ -1,4 +1,5 @@
-# Non-secret config. Overridden by AGILE_MONEY_* env vars (figment); secrets never go here.
+# Non-secret config. Put your own deployment's values in agile-money.local.toml (git-ignored,
+# same shape, loaded over this file); AGILE_MONEY_* env vars override both. Secrets never go here.
 network = "devnet" # mainnet also needs a per-rail opt-in below (rule 5)
 
 [database] # url comes from DATABASE_URL
@@ -11,13 +12,13 @@ migrate_on_start = true
 # Your chat id; message the bot /start to learn it. Or set AGILE_MONEY_TELEGRAM__OWNER_CHAT_ID.
 owner_chat_id = 0
 
-# Updates by webhook instead of long polling, on when a URL is set. Needs the tunnel:
-#   cloudflared tunnel --config ~/.cloudflared/tilly-dev.yml run
+# Updates by webhook instead of long polling, on when a URL is set. Needs a tunnel or
+# reverse proxy to the listener, e.g. `cloudflared tunnel --config <your-tunnel>.yml run`.
 # Env overrides the URL with TUNNEL_URL; the secret comes from TELEGRAM_WEBHOOK_SECRET
 # (1-256 of A-Z a-z 0-9 _ -). Registered with Telegram on every start. Remove the url
 # to go back to polling.
 [telegram.webhook]
-url = "https://bot.example.com"  # the tunnel's public base URL
+# url = "https://bot.example.com"  # the tunnel's public base URL
 path = "/telegram"
 listen = "127.0.0.1:8443"
 # drop_pending_updates = false
@@ -33,15 +34,13 @@ watch_delay_ms = 2000
 # DEEPSEEK_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY picks deepseek, claude or openai.
 # provider = "deepseek"         # deepseek | claude | openai | compatible
 step_limit = 12
-# Cloudflare's unified AI REST API (OpenAI format), routed through the `my-gateway`
-# gateway. The key is a Cloudflare API token: set AGILE_MONEY_AGENT__API_KEY. Third-party
-# models bill through Unified Billing, so no provider key is needed.
-provider = "compatible"
-# DeepSeek V4 Flash on Workers AI: function calling, ~1.6s per step. Stronger but
-# ~2.5x slower: @cf/deepseek-ai/deepseek-v4-pro-0813. Third-party models are
-# author/model, e.g. openai/gpt-5.5.
-model = "@cf/deepseek-ai/deepseek-v4-flash-0731"
-base_url = "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/v1/"
+# Cloudflare's unified AI REST API (OpenAI format). The key is a Cloudflare API token
+# with Workers AI permission: set AGILE_MONEY_AGENT__API_KEY. DeepSeek V4 Flash does
+# function calling at ~1.6s per step; third-party models are author/model, e.g.
+# openai/gpt-5.5, and bill through Unified Billing.
+# provider = "compatible"
+# model = "@cf/deepseek-ai/deepseek-v4-flash-0731"
+# base_url = "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/v1/"
 # model = "deepseek-flash"      # defaults per provider; required for `compatible`
 # base_url = "http://localhost:11434/v1"  # any OpenAI-compatible endpoint
 # stream = true                 # SSE; replies appear in Telegram as they're written
@@ -60,8 +59,8 @@ max_retries = 2                 # on 408/409/429/5xx and connect errors, honouri
 # account_id = "your-account-id"
 # gateway_id = "default"
 
-[agent.headers]                 # extra non-secret headers, e.g. gateway options
-cf-aig-gateway-id = "my-gateway"
+# [agent.headers]               # extra non-secret headers, e.g. gateway options
+# cf-aig-gateway-id = "my-gateway"
 # cf-aig-collect-log-payload = "false"
 
 # [agent.openai]
@@ -82,10 +81,10 @@ mainnet = false
 # within the per-payment cap, daily cap and recipient list the owner key signed for.
 # The bot's keypair can ask it to pay but can't change those. Set up with
 # `cargo run -p agile-money-rail-sol --example vault`; both values are public keys.
-# Remove this section to pay from the bot's wallet again.
-[rail.sol.vault]
-program = "<VAULT_PROGRAM_ID>"
-owner = "<OWNER_PUBKEY>"
+# Without this section the bot pays from its own wallet.
+# [rail.sol.vault]
+# program = "<vault program id>"
+# owner = "<owner public key>"
 
 # PayPal: payment requests in USD as checkout links, paid by PayPal or card. On when
 # AGILE_MONEY_RAIL__PAYPAL__CLIENT_ID and AGILE_MONEY_RAIL__PAYPAL__CLIENT_SECRET are set, from a
@@ -117,12 +116,9 @@ cooling_off = "24h"
 # however small, so injected text can't drain saved contacts a little at a time.
 payments_per_day = 5
 
-# Who the agent may pay; anything else is denied by policy. Seeded as live contacts at startup. Add more from Telegram (/addcontact) or the
-# dashboard; those need a code and wait out the cooling-off.
-[[contacts]]
-label = "Acme Design"
-address = "7Np41oeYqPefeNQEHSv1UDhYrehxin3NStELsSKCT4K2"
-
-[[contacts]]
-label = "Bob"
-address = "11111111111111111111111111111111"
+# Who the agent may pay; anything else is denied by policy. Seeded as live contacts at
+# startup. Add more from Telegram (/addcontact) or the dashboard; those need a code and
+# wait out the cooling-off.
+# [[contacts]]
+# label = "Acme Design"
+# address = "<Solana address>"
