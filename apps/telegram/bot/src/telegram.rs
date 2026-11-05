@@ -250,7 +250,7 @@ fn args(text: &str) -> &str {
         .map_or("", |(_, rest)| rest.trim())
 }
 
-/// `/contacts@AgileMoneyBot extra` -> `/contacts`; anything else unchanged.
+/// `/contacts@agilemoney_bot extra` -> `/contacts`; anything else unchanged.
 fn command(text: &str) -> &str {
     let text = text.trim();
     if !text.starts_with('/') {
@@ -647,7 +647,7 @@ mod tests {
     #[test]
     fn commands_drop_the_bot_name_and_arguments() {
         assert_eq!(command("/contacts"), "/contacts");
-        assert_eq!(command(" /contacts@AgileMoneyBot "), "/contacts");
+        assert_eq!(command(" /contacts@agilemoney_bot "), "/contacts");
         assert_eq!(command("/balance now"), "/balance");
         assert_eq!(command("pay Bob 0.01 SOL"), "pay Bob 0.01 SOL");
     }
