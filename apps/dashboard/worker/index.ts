@@ -1,221 +1,155 @@
 // The dashboard's Worker: the owner signs in with a password, or a linked Solana
 // wallet's signature, and, once codes are set up, an authenticator code the bot
-// checks. Then `/api/*` is forwarded to the
-// bot's API with the bot's token. The token never reaches the browser; the
-// browser holds only a signed, short-lived session cookie.
+// checks. Then `/api/*` is forwarded to the bot's API with the bot's token. The
+// token never reaches the browser; the browser holds only a signed, short-lived
+// session cookie.
 
-interface Secrets {
-  /** The bot's DASHBOARD_TOKEN. */
-  DASHBOARD_TOKEN: string;
-  /** The owner's sign-in. */
-  DASHBOARD_PASSWORD: string;
-}
+import { zValidator } from "@hono/zod-validator";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
+import { deleteCookie, getSignedCookie, setSignedCookie } from "hono/cookie";
+import { HTTPException } from "hono/http-exception";
+import { proxy } from "hono/proxy";
+import { timingSafeEqual } from "hono/utils/buffer";
+import { z } from "zod";
 
-type Bindings = Env & Secrets;
+type App = { Bindings: Env };
+type Ctx = Context<App>;
 
 const COOKIE = "agile_money_session";
 /** Sessions last 12 hours. */
 const SESSION_SECONDS = 12 * 60 * 60;
+const NO_STORE = { "content-type": "application/json", "cache-control": "no-store" };
 
-export default {
-  async fetch(request: Request, env: Bindings): Promise<Response> {
-    const url = new URL(request.url);
-    if (!env.DASHBOARD_TOKEN || !env.DASHBOARD_PASSWORD) {
-      return json({ error: "dashboard secrets are not set" }, 500);
-    }
-    if (url.pathname === "/auth/login" && request.method === "POST") {
-      return login(request, env);
-    }
-    if (url.pathname === "/auth/wallet/challenge" && request.method === "POST") {
-      return walletChallenge(request, env);
-    }
-    if (url.pathname === "/auth/wallet" && request.method === "POST") {
-      return walletLogin(request, env);
-    }
-    if (url.pathname === "/auth/logout" && request.method === "POST") {
-      return json({ ok: true }, 200, cookie("", 0, url));
-    }
-    if (url.pathname === "/auth/session") {
-      return json({ signedIn: await signedIn(request, env) });
-    }
-    if (url.pathname.startsWith("/api/")) {
-      if (!(await signedIn(request, env))) {
-        return json({ error: "sign in first" }, 401);
-      }
-      return forward(request, url, env);
-    }
-    return json({ error: "not found" }, 404);
-  },
-} satisfies ExportedHandler<Bindings>;
+// Request bodies. Anything else is a 400 before the bot is asked.
+const login = z.object({
+  // Copying from a file often brings a trailing newline or space along.
+  password: z.string().trim(),
+  code: z.string().optional(),
+});
+const challenge = z.object({ address: z.string() });
+const walletLogin = z.object({
+  address: z.string(),
+  signature: z.string(),
+  code: z.string().optional(),
+});
 
-/** Slows guessing. Approximate and per location; the bot's code check behind it
- * is strict (five wrong codes lock codes for 15 minutes). */
-async function limited(request: Request, env: Bindings): Promise<Response | null> {
-  const ip = request.headers.get("cf-connecting-ip") ?? "local";
+const body = <T extends z.ZodType>(schema: T) =>
+  zValidator("json", schema, (result, c) => {
+    if (!result.success) return c.json({ error: "That request isn't valid." }, 400);
+  });
+
+/** HMAC key for the session cookie. Derived from the bot token, so rotating it signs everyone out. */
+const secret = (c: Ctx) => `session:${c.env.DASHBOARD_TOKEN}`;
+
+/** Slows guessing. Approximate and per location; the bot's code check behind it is
+ * strict (five wrong codes lock codes for 15 minutes). */
+const rateLimited: MiddlewareHandler<App> = async (c, next) => {
+  const ip = c.req.header("cf-connecting-ip") ?? "local";
   const [perIp, overall] = await Promise.all([
-    env.LOGIN_LIMIT.limit({ key: `ip:${ip}` }),
-    env.LOGIN_LIMIT_ALL.limit({ key: "all" }),
+    c.env.LOGIN_LIMIT.limit({ key: `ip:${ip}` }),
+    c.env.LOGIN_LIMIT_ALL.limit({ key: "all" }),
   ]);
   if (!perIp.success || !overall.success) {
-    return json({ error: "Too many sign-in attempts. Wait a minute." }, 429);
+    return c.json({ error: "Too many sign-in attempts. Wait a minute." }, 429);
   }
-  return null;
-}
+  await next();
+};
 
-async function login(request: Request, env: Bindings): Promise<Response> {
-  const slow = await limited(request, env);
-  if (slow) return slow;
-  const body = (await request.json().catch(() => ({}))) as { password?: unknown; code?: unknown };
-  // Copying from a file often brings a trailing newline or space along.
-  const given = typeof body.password === "string" ? body.password.trim() : "";
-  if (!(await equal(given, env.DASHBOARD_PASSWORD))) {
-    return json({ error: "wrong password" }, 401);
-  }
-  // The bot checks the code, or says none is set up, and tells Telegram.
-  const code = typeof body.code === "string" ? body.code : undefined;
-  const check = await forwardJson("/api/sign-in", { code }, env, request);
-  if (!check.ok) return check;
-  return session(request, env);
-}
+const signedIn: MiddlewareHandler<App> = async (c, next) => {
+  if (!(await hasSession(c))) return c.json({ error: "sign in first" }, 401);
+  await next();
+};
 
-/** The message a linked wallet signs to sign in. The bot names this host in it. */
-async function walletChallenge(request: Request, env: Bindings): Promise<Response> {
-  const slow = await limited(request, env);
-  if (slow) return slow;
-  const body = (await request.json().catch(() => ({}))) as { address?: unknown };
-  const address = typeof body.address === "string" ? body.address : "";
-  return forwardJson("/api/wallet/challenge", { address, purpose: "sign-in" }, env, request);
-}
+const app = new Hono<App>()
+  .use(async (c, next) => {
+    if (!c.env.DASHBOARD_TOKEN || !c.env.DASHBOARD_PASSWORD) {
+      return c.json({ error: "dashboard secrets are not set" }, 500);
+    }
+    await next();
+    c.header("cache-control", "no-store");
+  })
 
-/** In place of the password: the bot checks the signature, the wallet is linked,
- * and the code, and tells Telegram. */
-async function walletLogin(request: Request, env: Bindings): Promise<Response> {
-  const slow = await limited(request, env);
-  if (slow) return slow;
-  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-  const text = (key: string) => (typeof body[key] === "string" ? (body[key] as string) : undefined);
-  const check = await forwardJson(
-    "/api/sign-in/wallet",
-    { address: text("address") ?? "", signature: text("signature") ?? "", code: text("code") },
-    env,
-    request,
-  );
-  if (!check.ok) return check;
-  return session(request, env);
-}
+  .post("/auth/login", rateLimited, body(login), async (c) => {
+    const { password, code } = c.req.valid("json");
+    if (!(await timingSafeEqual(password, c.env.DASHBOARD_PASSWORD))) {
+      return c.json({ error: "wrong password" }, 401);
+    }
+    // The bot checks the code, or says none is set up, and tells Telegram.
+    const check = await toBot(c, "/api/sign-in", "POST", JSON.stringify({ code }));
+    return check.ok ? startSession(c) : check;
+  })
 
-async function session(request: Request, env: Bindings): Promise<Response> {
-  const expires = Math.floor(Date.now() / 1000) + SESSION_SECONDS;
-  const value = `${expires}.${await sign(String(expires), env)}`;
-  return json({ ok: true }, 200, cookie(value, SESSION_SECONDS, new URL(request.url)));
-}
+  /** The message a linked wallet signs to sign in. The bot names this host in it. */
+  .post("/auth/wallet/challenge", rateLimited, body(challenge), (c) => {
+    const { address } = c.req.valid("json");
+    return toBot(c, "/api/wallet/challenge", "POST", JSON.stringify({ address, purpose: "sign-in" }));
+  })
 
-/** Headers for the bot: its token, and this dashboard's host for wallet messages. */
-function botHeaders(request: Request, env: Bindings): HeadersInit {
-  return {
-    authorization: `Bearer ${env.DASHBOARD_TOKEN}`,
-    "content-type": "application/json",
-    "x-dashboard-host": new URL(request.url).host,
-  };
-}
+  /** In place of the password: the bot checks the signature, that the wallet is linked,
+   * and the code, and tells Telegram. */
+  .post("/auth/wallet", rateLimited, body(walletLogin), async (c) => {
+    const check = await toBot(c, "/api/sign-in/wallet", "POST", JSON.stringify(c.req.valid("json")));
+    return check.ok ? startSession(c) : check;
+  })
 
-async function signedIn(request: Request, env: Bindings): Promise<boolean> {
-  const value = readCookie(request, COOKIE);
-  if (!value) return false;
-  const [expires, mac] = value.split(".");
-  if (!expires || !mac || Number(expires) < Date.now() / 1000) return false;
-  return equal(mac, await sign(expires, env));
-}
+  .post("/auth/logout", (c) => {
+    deleteCookie(c, COOKIE, { path: "/" });
+    return c.json({ ok: true });
+  })
 
-/** Forwards to the bot. Only the method, path, query and JSON body pass through. */
-async function forward(request: Request, url: URL, env: Bindings): Promise<Response> {
-  const target = new URL(url.pathname + url.search, env.BOT_API_URL);
-  const init: RequestInit = {
-    method: request.method,
-    headers: botHeaders(request, env),
-  };
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    init.body = await request.text();
-  }
-  try {
-    const reply = await fetch(target, init);
-    return new Response(reply.body, {
-      status: reply.status,
-      headers: { "content-type": "application/json", "cache-control": "no-store" },
-    });
-  } catch {
-    return json({ error: "Agile Money is not reachable. Is the bot running?" }, 502);
-  }
-}
+  .get("/auth/session", async (c) => c.json({ signedIn: await hasSession(c) }))
 
-/** POSTs JSON to the bot from the Worker itself, not on the browser's behalf. */
-async function forwardJson(
-  path: string,
-  body: unknown,
-  env: Bindings,
-  request: Request,
-): Promise<Response> {
-  try {
-    const reply = await fetch(new URL(path, env.BOT_API_URL), {
-      method: "POST",
-      headers: botHeaders(request, env),
-      body: JSON.stringify(body),
-    });
-    return new Response(reply.body, {
-      status: reply.status,
-      headers: { "content-type": "application/json", "cache-control": "no-store" },
-    });
-  } catch {
-    return json({ error: "Agile Money is not reachable. Is the bot running?" }, 502);
-  }
-}
+  /** Only the method, path, query and body pass through, never the browser's headers. */
+  .all("/api/*", signedIn, async (c) => {
+    const { pathname, search } = new URL(c.req.url);
+    const method = c.req.method;
+    const payload = method === "GET" || method === "HEAD" ? undefined : await c.req.text();
+    return toBot(c, pathname + search, method, payload);
+  })
 
-/** HMAC-SHA256 under the bot token, so rotating the token signs everyone out. */
-async function sign(text: string, env: Bindings): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(`session:${env.DASHBOARD_TOKEN}`),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(text));
-  return btoa(String.fromCharCode(...new Uint8Array(mac)))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replaceAll("=", "");
-}
-
-/** Compares digests, so the time taken says nothing about where the inputs differ. */
-async function equal(a: string, b: string): Promise<boolean> {
-  const digest = async (s: string) =>
-    new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
-  const [x, y] = await Promise.all([digest(a), digest(b)]);
-  let diff = 0;
-  for (let i = 0; i < x.length; i++) diff |= x[i]! ^ y[i]!;
-  return diff === 0;
-}
-
-function readCookie(request: Request, name: string): string | undefined {
-  const header = request.headers.get("cookie") ?? "";
-  for (const part of header.split(";")) {
-    const [key, ...rest] = part.trim().split("=");
-    if (key === name) return rest.join("=");
-  }
-  return undefined;
-}
-
-function cookie(value: string, maxAge: number, url: URL): HeadersInit {
-  // Secure everywhere but plain-http localhost, where browsers would drop it.
-  const secure = url.protocol === "https:" ? "; Secure" : "";
-  return {
-    "set-cookie": `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`,
-  };
-}
-
-function json(body: unknown, status = 200, headers: HeadersInit = {}): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json", "cache-control": "no-store", ...headers },
+  .notFound((c) => c.json({ error: "not found" }, 404))
+  .onError((err, c) => {
+    if (err instanceof HTTPException) return c.json({ error: err.message }, err.status);
+    console.error(err);
+    return c.json({ error: "Something went wrong." }, 500);
   });
+
+export default app satisfies ExportedHandler<Env>;
+
+async function startSession(c: Ctx): Promise<Response> {
+  const expires = Math.floor(Date.now() / 1000) + SESSION_SECONDS;
+  await setSignedCookie(c, COOKIE, String(expires), secret(c), {
+    path: "/",
+    httpOnly: true,
+    sameSite: "Strict",
+    maxAge: SESSION_SECONDS,
+    // Everywhere but plain-http localhost, where browsers would drop it.
+    secure: new URL(c.req.url).protocol === "https:",
+  });
+  return c.json({ ok: true });
+}
+
+/** A validly signed cookie that hasn't expired. The signature covers the expiry. */
+async function hasSession(c: Ctx): Promise<boolean> {
+  const expires = await getSignedCookie(c, secret(c), COOKIE);
+  return !!expires && Number(expires) > Date.now() / 1000;
+}
+
+/** Calls the bot with its token and this dashboard's host (for wallet messages). The
+ * reply goes back as JSON with none of the bot's own headers. */
+async function toBot(c: Ctx, path: string, method: string, payload?: string): Promise<Response> {
+  try {
+    const reply = await proxy(new URL(path, c.env.BOT_API_URL), {
+      method,
+      body: payload,
+      headers: {
+        authorization: `Bearer ${c.env.DASHBOARD_TOKEN}`,
+        "content-type": "application/json",
+        "x-dashboard-host": new URL(c.req.url).host,
+      },
+    });
+    return new Response(reply.body, { status: reply.status, headers: NO_STORE });
+  } catch {
+    return c.json({ error: "Agile Money is not reachable. Is the bot running?" }, 502);
+  }
 }
